@@ -20,17 +20,39 @@ public sealed record ToolGuardOutcome(
 /// correction available: it reuses the ReAct iteration the agent was already going to take, and it
 /// prevents side effects that a response-level retry could not undo.
 /// </remarks>
-public sealed class ToolGuard(IEnumerable<ToolArgumentRule> rules, Action<ToolGuardOutcome>? onCall = null)
+public sealed class ToolGuard(
+    IEnumerable<ToolArgumentRule> rules,
+    Action<ToolGuardOutcome>? onCall = null,
+    IEnumerable<ToolContextRule>? contextRules = null)
 {
     private readonly Dictionary<string, ToolArgumentRule> _rules =
         rules.ToDictionary(rule => rule.ToolName, StringComparer.OrdinalIgnoreCase);
 
+    private readonly ToolContextRule[] _contextRules = contextRules?.ToArray() ?? [];
+
     /// <summary>Returns <see langword="null"/> when the tool has no declared constraints.</summary>
-    public RuleReport? Validate(string toolName, IReadOnlyDictionary<string, object?> arguments)
+    public RuleReport? Validate(
+        string toolName,
+        IReadOnlyDictionary<string, object?> arguments,
+        IReadOnlyList<ChatMessage>? messages = null)
     {
-        return _rules.TryGetValue(toolName, out ToolArgumentRule? rule)
-            ? ToolArgumentRules.Evaluate(rule, arguments)
-            : null;
+        List<CheckResult> checks = [];
+
+        if (_rules.TryGetValue(toolName, out ToolArgumentRule? rule))
+        {
+            checks.AddRange(ToolArgumentRules.Evaluate(rule, arguments).Checks);
+        }
+
+        // Conversation-aware rules run even for tools with no argument constraints, because the
+        // failure they catch lives in the request rather than in the values passed.
+        foreach (ToolContextRule contextRule in _contextRules
+            .Where(r => r.ToolName.Equals(toolName, StringComparison.OrdinalIgnoreCase)))
+        {
+            (bool passed, string detail) = contextRule.Check(arguments, messages ?? []);
+            checks.Add(new CheckResult(contextRule.Name, passed, detail, contextRule.Severity));
+        }
+
+        return checks.Count == 0 ? null : new RuleReport(checks);
     }
 
     /// <summary>Middleware entry point for <c>AIAgentBuilder.Use</c>.</summary>
@@ -44,7 +66,7 @@ public sealed class ToolGuard(IEnumerable<ToolArgumentRule> rules, Action<ToolGu
         ArgumentNullException.ThrowIfNull(next);
 
         string toolName = context.Function.Name;
-        RuleReport? report = Validate(toolName, context.Arguments);
+        RuleReport? report = Validate(toolName, context.Arguments, context.Messages.ToArray());
         bool rejected = report is not null && !report.Passed && report.HighestSeverity >= RuleSeverity.Retry;
 
         // Every invocation is recorded, not only refusals: an agent that never reached for a tool
@@ -73,4 +95,6 @@ public sealed class ToolGuard(IEnumerable<ToolArgumentRule> rules, Action<ToolGu
             + "\nCorrect the arguments and try again, or explain the limitation to the customer.";
     }
 }
+
+
 

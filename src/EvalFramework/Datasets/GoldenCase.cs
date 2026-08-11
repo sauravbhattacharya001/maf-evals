@@ -50,6 +50,13 @@ public sealed class GoldenCase
     public IReadOnlyList<ExpectedToolCall> ExpectedToolCalls { get; init; } = [];
 
     /// <summary>
+    /// Meaning-based expectations, checked by embedding similarity in Tier 2. Use these where a
+    /// property is about what was said rather than what was done, since a word list tests phrasing.
+    /// </summary>
+    [JsonPropertyName("semanticExpectations")]
+    public IReadOnlyList<SemanticExpectation> SemanticExpectations { get; init; } = [];
+
+    /// <summary>
     /// Tools the agent must not successfully call. A call the guard rejected does not count as a
     /// violation, which keeps "escalated correctly" distinct from "tried and was stopped".
     /// </summary>
@@ -81,6 +88,7 @@ public sealed class GoldenCase
         Severities = Severities
     };
 }
+
 
 
 

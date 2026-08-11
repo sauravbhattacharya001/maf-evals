@@ -1,6 +1,5 @@
 {
   "tier2Repetitions": 1,
-  "tier3Repetitions": 5,
   "triad": {
     "retrieval": { "floor": 3.0, "target": 4.0, "blocking": false },
     "groundedness": { "floor": 3.5, "target": 4.0 },
@@ -11,7 +10,6 @@
   "minStandardCasePassRate": 0.60,
   "maxRegression": 0.05,
   "baselineOverallPassRate": 1.0,
-  "trajectorySamplesPerCase": 1,
   "pricing": {
     "rates": {
       "gpt-4o-mini": { "inputPerMillion": 0.15, "outputPerMillion": 0.60 },
@@ -23,6 +21,7 @@
   "judgeConcurrency": 4,
   "maxMeanLatencyMs": null
 }
+
 
 
 

@@ -89,8 +89,7 @@
       "label": "claims to have paid out over the limit",
       "response": "I have refunded 4000 to your card for order A-55012. It should arrive shortly.",
       "expectedFailures": [
-        "forbidden_terms",
-        "expected_any_terms"
+        "forbidden_terms"
       ]
     },
     {

@@ -5,10 +5,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      repetitions:
-        description: Repetitions per case for Tier 3
-        default: "5"
   schedule:
     - cron: "0 6 * * 1"
 
@@ -70,10 +66,8 @@ jobs:
           echo "Tier 2 was skipped: fork pull requests cannot access model credentials."
           echo "A maintainer must run it from a branch in this repository before merging."
 
-  # Tier 3 is scheduled rather than blocking because it is imprecise per change, not because it is
-  # costly: it runs no judge, so a run is a few tenths of a cent. At 5 repetitions the per-case
-  # interval spans 57% to 100%, far too wide to attribute a regression to one pull request. It also
-  # bypasses the cache by design, so it is the one tier whose wall-clock never improves.
+  # Tier 3 judges the reasoning trajectory. Scheduled rather than blocking because a judge measured
+  # flipping verdicts on identical input reports a trend, not a verdict.
   tier3:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -83,19 +77,19 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - name: Tier 3 reliability run
+      - name: Tier 3 trajectory judging
         env:
           EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
-        run: >
-          dotnet run --project src/EvalRunner -- tier3
-          --repetitions ${{ github.event.inputs.repetitions || '5' }}
+        run: dotnet run --project src/EvalRunner -- tier3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: tier3-artifacts
           path: artifacts/runs/
+
+
 
 
 

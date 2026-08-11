@@ -51,21 +51,22 @@ public sealed class ResilienceTests
     }
 
     [Fact]
-    public async Task ConcurrentJudgingIsFasterThanSequential()
+    public async Task JudgingReallyRunsInParallel()
     {
-        ResponseRecord[] records = Enumerable.Range(1, 8).Select(i => Record($"case-{i}")).ToArray();
+        // Previously asserted by comparing wall-clock times, which made the suite itself flaky
+        // under load: precisely the failure mode this repository argues against elsewhere. The
+        // barrier proves concurrency instead of timing it. If the evaluator serialised, the first
+        // call would wait for peers that never arrive and the test would fail by cancellation.
+        const int expected = 4;
 
-        long start = Stopwatch.GetTimestamp();
-        await new TriadEvaluator(new SlowFailingChatClient(40))
-            .EvaluateManyAsync(records, maxConcurrency: 8, cancellationToken: Ct);
-        TimeSpan parallel = Stopwatch.GetElapsedTime(start);
+        BarrierChatClient client = new(expected);
+        ResponseRecord[] records = Enumerable.Range(1, expected).Select(i => Record($"case-{i}")).ToArray();
 
-        start = Stopwatch.GetTimestamp();
-        await new TriadEvaluator(new SlowFailingChatClient(40))
-            .EvaluateManyAsync(records, maxConcurrency: 1, cancellationToken: Ct);
-        TimeSpan sequential = Stopwatch.GetElapsedTime(start);
+        IReadOnlyList<TriadResult> results = await new TriadEvaluator(client)
+            .EvaluateManyAsync(records, maxConcurrency: expected, cancellationToken: Ct);
 
-        Assert.True(parallel < sequential, $"parallel {parallel.TotalMilliseconds}ms vs {sequential.TotalMilliseconds}ms");
+        Assert.Equal(expected, results.Count);
+        Assert.True(client.ReachedBarrier);
     }
 
     [Fact]
@@ -120,6 +121,44 @@ public sealed class ResilienceTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             new TriadEvaluator(new SlowFailingChatClient(1))
                 .EvaluateManyAsync([], maxConcurrency: 0, cancellationToken: Ct));
+    }
+
+    /// <summary>Blocks until the expected number of calls are in flight, proving real concurrency.</summary>
+    private sealed class BarrierChatClient(int expected) : IChatClient
+    {
+        private readonly TaskCompletionSource _allArrived =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private int _current;
+
+        public bool ReachedBarrier => _allArrived.Task.IsCompletedSuccessfully;
+
+        public async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _current) >= expected)
+            {
+                _allArrived.TrySetResult();
+            }
+
+            await _allArrived.Task.WaitAsync(cancellationToken);
+
+            throw new HttpRequestException("503 Service Unavailable");
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
     }
 
     /// <summary>Fails after a delay, so timing and concurrency can be observed without a model.</summary>
@@ -198,3 +237,4 @@ public sealed class ResilienceTests
             throw new NotSupportedException();
     }
 }
+

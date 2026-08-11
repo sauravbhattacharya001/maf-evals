@@ -37,6 +37,28 @@ public static class ModelFactory
         return (Wrap(Create(key, model, endpoint), cache, usage), model, usage);
     }
 
+    /// <summary>
+    /// Embeddings for semantic rules. Separate from the judge because it answers a different
+    /// question: similarity of meaning, deterministically, rather than an opinion.
+    /// </summary>
+    public static (IEmbeddingGenerator<string, Embedding<float>> Generator, string Model) CreateEmbedder()
+    {
+        string key = EnvironmentSettings.Required(Lookup, "EVAL_API_KEY", "OPENAI_API_KEY");
+        string model = EnvironmentSettings.Optional(Lookup, "text-embedding-3-small", "EMBEDDING_MODEL");
+        string? endpoint = EnvironmentSettings.OptionalOrNull(Lookup, "EVAL_ENDPOINT");
+
+        OpenAIClientOptions options = new();
+
+        if (!string.IsNullOrWhiteSpace(endpoint))
+        {
+            options.Endpoint = new Uri(endpoint);
+        }
+
+        return (new OpenAIClient(new ApiKeyCredential(key), options)
+            .GetEmbeddingClient(model)
+            .AsIEmbeddingGenerator(), model);
+    }
+
     private static IChatClient Wrap(IChatClient client, bool cache, UsageTracker usage)
     {
         ChatClientBuilder builder = client.AsBuilder().UseFunctionInvocation();
@@ -66,4 +88,5 @@ public static class ModelFactory
 
     private static Func<string, string?> Lookup => EnvironmentSettings.SystemLookup;
 }
+
 

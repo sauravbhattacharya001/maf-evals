@@ -26,6 +26,7 @@ try
         "rules" => Rules(),
         "tier2" => await Tier2Async(cli),
         "tier3" => await Tier3Async(cli),
+        "incident" => await ReplayIncidentAsync(cli),
         "report" => Report(cli),
         "retrieve" => Retrieve(cli),
         "safety" => await SafetyAsync(cli),
@@ -119,6 +120,40 @@ static async Task<int> Tier2Async(CommandLine cli)
     RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds), usage, config.Pricing)
         .RunAsync(cases, repetitions, tier: "tier2", RepoPaths.GoldenSet, progress);
 
+    // Semantic expectations run here, never in Tier 1: the hot path must stay free of network calls.
+    if (cases.Any(item => item.SemanticExpectations.Count > 0))
+    {
+        (IEmbeddingGenerator<string, Embedding<float>> embedder, string embedModel) =
+            ModelFactory.CreateEmbedder();
+
+        Console.WriteLine($"\nChecking semantic expectations with {embedModel}");
+        SemanticRuleEvaluator semantic = new(embedder);
+
+        Dictionary<string, GoldenCase> byId = cases.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
+        List<ResponseRecord> updated = [];
+
+        foreach (ResponseRecord record in run.Responses)
+        {
+            if (!byId.TryGetValue(record.CaseId, out GoldenCase? goldenCase)
+                || goldenCase.SemanticExpectations.Count == 0
+                || !record.Counts)
+            {
+                updated.Add(record);
+                continue;
+            }
+
+            RuleReport semanticReport =
+                await semantic.EvaluateAsync(goldenCase.SemanticExpectations, record.Response);
+
+            updated.Add(record with
+            {
+                Rules = new RuleReport([.. record.Rules.Checks, .. semanticReport.Checks])
+            });
+        }
+
+        run = run with { Responses = updated, Cases = RunAnalyzer.Summarize(cases, updated) };
+    }
+
     List<TriadResult> triad = [];
     bool triadEvaluated = !cli.HasFlag("--no-triad");
     UsageTracker? judgeTracker = null;
@@ -207,78 +242,86 @@ static async Task<int> SafetyAsync(CommandLine cli)
 }
 
 // Tier 3: scheduled reliability measurement, or forensic replay of one incident.
+// Tier 3: model as judge over the reasoning trajectory. Nothing else lives here.
+// It answers a question the other tiers cannot: not whether the answer was acceptable, but whether
+// the agent reasoned its way there. Reported as a distribution and never gating, because a judge
+// measured flipping verdicts on identical input cannot decide a merge.
 static async Task<int> Tier3Async(CommandLine cli)
 {
-    if (cli.Option("--incident") is string incidentPath)
-    {
-        return await ReplayIncidentAsync(cli, incidentPath);
-    }
-
     IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
     EvalConfig config = LoadConfig();
-    int repetitions = cli.IntOption("--repetitions") ?? config.Tier3Repetitions;
 
-    (AIAgent agent, IRunTelemetrySource telemetry, string model, UsageTracker usage) = BuildAgent(repetitions);
+    RunArtifact run;
 
-    Console.WriteLine($"Tier 3: {cases.Count} cases x {repetitions} on {model}\n");
-    Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
-
-    RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds), usage, config.Pricing)
-        .RunAsync(cases, repetitions, tier: "tier3", RepoPaths.GoldenSet, progress);
-
-    // Trajectory judging: did the agent reason soundly, not merely answer consistently. Sampled,
-    // reported as a distribution, and never allowed to fail the run: a scheduled tier exists to
-    // reveal drift, and a stochastic judge cannot be a gate.
-    int samples = cli.IntOption("--trajectory-samples") ?? config.TrajectorySamplesPerCase;
-
-    if (samples > 0 && !cli.HasFlag("--no-trajectory"))
+    // Trajectories already recorded by an earlier run can be judged without paying for the agent
+    // again, which is the same rule the triad follows: never buy the same response twice.
+    if (cli.Option("--run") is string existing)
     {
-        (IChatClient judgeClient, string judgeModel, UsageTracker judgeUsage) =
-            ModelFactory.CreateJudge(cache: false);
+        run = ArtifactReader.ReadRun(existing);
+        Console.WriteLine($"Tier 3: judging trajectories from {Path.GetFileName(existing)}\n");
+    }
+    else
+    {
+        (AIAgent agent, IRunTelemetrySource telemetry, string model, UsageTracker usage) = BuildAgent();
 
-        ResponseRecord[] sampled = run.Responses
-            .Where(record => record.Counts && !record.Blocked)
-            .GroupBy(record => record.CaseId, StringComparer.OrdinalIgnoreCase)
-            .SelectMany(group => group.OrderBy(record => record.Repetition).Take(samples))
-            .ToArray();
+        Console.WriteLine($"Tier 3: {cases.Count} cases on {model}\n");
+        Progress<string> runProgress = new(line => Console.WriteLine($"  {line}"));
 
-        Console.WriteLine($"\nJudging {sampled.Length} trajectories with {judgeModel}");
-
-        IReadOnlyList<TrajectoryResult> judged = await new TrajectoryEvaluator(
-                judgeClient, SupportPolicy.CreateTools(), TimeSpan.FromSeconds(config.CallTimeoutSeconds))
-            .EvaluateManyAsync(sampled, config.JudgeConcurrency, progress);
-
-        run = run with
-        {
-            TrajectoryResults = judged,
-            TrajectorySummary = TrajectorySummary.Summarize(judged)
-        };
-
-        Console.WriteLine();
-        Console.WriteLine("| Trajectory metric | scale | judged | mean | sd | min | weak cases |");
-        Console.WriteLine("| --- | --- | --- | --- | --- | --- | --- |");
-
-        foreach (TrajectoryMetricSummary summary in run.TrajectorySummary)
-        {
-            string weak = summary.WorstCases.Count == 0 ? "-" : string.Join(", ", summary.WorstCases);
-            Console.WriteLine(
-                $"| {summary.Metric} | {summary.Scale} | {summary.Judged} | {summary.Mean:F2} " +
-                $"| {summary.StandardDeviation:F2} | {summary.Min:F1} | {weak} |");
-        }
-
-        Console.WriteLine();
-        Console.WriteLine($"judge spend: {judgeUsage.Snapshot(config.Pricing).EstimatedCostUsd:C4}");
+        run = await new AgentRunner(
+                agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds), usage, config.Pricing)
+            .RunAsync(cases, repetitions: 1, tier: "tier3", RepoPaths.GoldenSet, runProgress);
     }
 
-    GateReport gates = RunAnalyzer.ApplyGates(run, config);
+    ResponseRecord[] judgeable = run.Responses
+        .Where(record => record.Counts && !record.Blocked && record.Trajectory.Count > 0)
+        .ToArray();
+
+    if (judgeable.Length == 0)
+    {
+        Console.Error.WriteLine("error: no trajectories to judge.");
+        return 2;
+    }
+
+    (IChatClient judgeClient, string judgeModel, UsageTracker judgeUsage) =
+        ModelFactory.CreateJudge(cache: false);
+
+    Console.WriteLine($"Judging {Plural(judgeable.Length)} with {judgeModel}\n");
+    Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
+
+    IReadOnlyList<TrajectoryResult> judged = await new TrajectoryEvaluator(
+            judgeClient, SupportPolicy.CreateTools(), TimeSpan.FromSeconds(config.CallTimeoutSeconds))
+        .EvaluateManyAsync(judgeable, config.JudgeConcurrency, progress);
+
+    run = run with
+    {
+        Tier = "tier3",
+        TrajectoryResults = judged,
+        TrajectorySummary = TrajectorySummary.Summarize(judged)
+    };
+
     string path = Save($"tier3-{run.RunId}.json", run);
 
     Console.WriteLine();
-    Console.WriteLine(MarkdownReport.ForRun(run, gates));
+    Console.WriteLine("| Trajectory metric | scale | judged | mean | sd | min | weak cases |");
+    Console.WriteLine("| --- | --- | --- | --- | --- | --- | --- |");
+
+    foreach (TrajectoryMetricSummary summary in run.TrajectorySummary)
+    {
+        string weak = summary.WorstCases.Count == 0 ? "-" : string.Join(", ", summary.WorstCases);
+        Console.WriteLine(
+            $"| {summary.Metric} | {summary.Scale} | {summary.Judged} | {summary.Mean:F2} " +
+            $"| {summary.StandardDeviation:F2} | {summary.Min:F1} | {weak} |");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"judge spend: {judgeUsage.Snapshot(config.Pricing).EstimatedCostUsd:C4}");
     Console.WriteLine($"artifact: {path}");
 
-    return gates.Passed ? 0 : 1;
+    // A trend, not a verdict. Exit zero unless the run could not be produced at all.
+    return 0;
 }
+
+static string Plural(int count) => count == 1 ? "1 trajectory" : $"{count} trajectories";
 
 static int Report(CommandLine cli)
 {
@@ -301,9 +344,13 @@ static int Report(CommandLine cli)
     return 0;
 }
 
-// Replays a captured production trace against today's rules. Fully offline unless a judge is asked for.
-static async Task<int> ReplayIncidentAsync(CommandLine cli, string incidentPath)
+// Incident replay. Its own command rather than part of a tier: it is a diagnostic run against one
+// captured trace, not a scheduled measurement of the agent. Offline unless a judge is asked for.
+static async Task<int> ReplayIncidentAsync(CommandLine cli)
 {
+    string incidentPath = cli.Option("--trace")
+        ?? throw new InvalidOperationException("Pass --trace PATH to replay a captured incident.");
+
     IncidentTrace trace = IncidentTrace.Load(incidentPath);
     IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
     EvalConfig config = LoadConfig();
@@ -467,9 +514,8 @@ static int Help()
           tier2 [--repetitions N]        Pull-request gate: rules, retrieval, and the RAG triad
                 [--no-triad]             Skip judge calls and gate on deterministic checks only
           safety [--repetitions N]       Adversarial suite: injection, jailbreak, extraction
-          tier3 [--repetitions N]        Scheduled run: reliability, plus judged reasoning trajectory
-                [--trajectory-samples N] [--no-trajectory]
-          tier3 --incident PATH [--judge] Replay a captured production trace against today's rules
+          tier3 [--run PATH]             Model as judge over the reasoning trajectory
+          incident --trace PATH [--judge]  Replay one captured production trace
           report [--run PATH]            Print the report for a saved run artifact
           calibrate [--repeat N] [--case ID] Score the judge against the human-labelled set;
                                          --repeat measures judge self-consistency
@@ -479,6 +525,8 @@ static int Help()
 
     return 0;
 }
+
+
 
 
 

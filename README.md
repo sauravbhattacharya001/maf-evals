@@ -13,18 +13,18 @@ answer different questions.
 
 | | Tier 1 | Tier 2 | Tier 3 |
 | --- | --- | --- | --- |
-| Runs | inside the agent, every request | CI, every pull request | scheduled, or after an incident |
-| Asks | can this response go out? | may this change merge? | did it reason well, and is that drifting? |
-| Checks | tool arguments, then final response | rules, retrieval, tool calls, RAG triad | trajectory quality, reliability, replay |
-| Model calls | none of its own | candidate and judge, cached | candidate uncached, judge sampled |
-| On failure | retry, then per-rule severity | block the merge | report and explain |
+| Runs | inside the agent, every request | CI, every pull request | scheduled, occasional |
+| Asks | can this response go out? | may this change merge? | did it reason its way there? |
+| Checks | tool arguments, then final response | rules, retrieval, tool calls, semantics, RAG triad | intent, task adherence, tool choice |
+| Model calls | none of its own | candidate, judge, embeddings | judge only |
+| On failure | retry, then per-rule severity | block the merge | report a trend, never block |
 
 ## Principles
 
 1. **A rule beats a judge** wherever the property can be expressed as a rule. Judges are for
    relevance and groundedness, not for formatting, required disclosures, or tool choice.
 2. **Never pay twice for a response.** The triad scores responses Tier 2 already generated.
-3. **One pass proves nothing.** Reliability claims live in Tier 3, not in the pull-request gate.
+3. **A judge reports, a rule gates.** Measured judge instability makes a stochastic score unfit to block a merge.
 4. **Measure the judge before trusting it.** Thresholds set without calibration are taste.
 5. **Missing data is not a failure.** An API error must never be counted as an agent regression.
 6. **A suite that cannot fail is not a suite.** Every rule is paired with output it must reject.
@@ -34,7 +34,7 @@ answer different questions.
 ```powershell
 dotnet test                                                   # 240 offline tests
 dotnet run --project src/EvalRunner -- rules                  # rules accept correct output
-dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
+dotnet run --project src/EvalRunner -- incident --trace incidents/sample-incident.json
 ```
 
 All three run with no credentials. Model-backed commands need a key in a gitignored `.env.local`,
@@ -49,7 +49,7 @@ JUDGE_MODEL=gpt-4o
 ```powershell
 dotnet run --project src/EvalRunner -- tier2       # the pull-request gate
 dotnet run --project src/EvalRunner -- safety      # adversarial suite
-dotnet run --project src/EvalRunner -- tier3 --repetitions 5
+dotnet run --project src/EvalRunner -- tier3
 dotnet run --project src/EvalRunner -- calibrate --repeat 3
 ```
 
@@ -59,8 +59,8 @@ dotnet run --project src/EvalRunner -- calibrate --repeat 3
 | --- | --- |
 | `rules` | Offline: rules accept the known-good responses |
 | `tier2 [--repetitions N] [--no-triad]` | Pull-request gate |
-| `tier3 [--repetitions N] [--trajectory-samples N]` | Scheduled: judged reasoning trajectory plus reliability |
-| `tier3 --incident PATH [--judge]` | Replay a captured production trace |
+| `tier3 [--run PATH]` | Model as judge over the reasoning trajectory |
+| `incident --trace PATH [--judge]` | Replay one captured production trace |
 | `safety [--repetitions N]` | Adversarial suite: injection, jailbreak, extraction |
 | `calibrate [--repeat N] [--case ID]` | Score the judge against human labels and against itself |
 | `retrieve --query "..." [--top N]` | Inspect retrieval offline while authoring a case |
@@ -134,64 +134,54 @@ A judge is stochastic, so a single cut-off turns a borderline score into a coin 
 a floor that blocks and a target that warns. Deterministic checks have no band; they always block,
 because they cannot flake.
 
-## Tier 3: reasoning quality, reliability, and forensics
+## Tier 3: model as judge over the trajectory
 
-Tier 2 asks whether the final answer was good. Tier 3 asks whether the agent **reasoned** well, which
-the answer alone cannot show: an agent that guesses correctly without checking, calls a tool it did
-not need, or ignores what a tool returned produces text indistinguishable from one that worked
-properly. Judging the path requires recording the path, so every run stores the full trajectory of
-turns, tool calls and tool results.
+Tier 3 does one thing: it judges how the agent reasoned. Not whether the answer was acceptable, which
+Tier 2 already gates, but whether the path to it was sound. An agent that guesses correctly without
+checking, calls a tool it did not need, or ignores what a tool returned produces text
+indistinguishable from one that worked properly. Judging the path requires recording the path, so
+every run stores the full trajectory of turns, tool calls and tool results.
 
 | Metric | Scale | Question |
 | --- | --- | --- |
 | Intent Resolution | 1-5 | did it work out what the customer actually wanted? |
 | Task Adherence | 1-5 | did it follow its instructions and use what it was given? |
-| Tool Call Accuracy | 0-1 | were the calls it made relevant and correctly parameterised? |
+| Tool Call Accuracy | 0-1 | were the calls relevant and correctly parameterised? |
 
-Reported as a distribution, never as a gate. Measured judge instability reaches a three point swing
-on identical input, so a single score cannot decide anything; a mean and spread across many judged
-trajectories survives that noise. The scales differ deliberately and are labelled, because reading a
-0.75 pass rate as a poor 1-5 rating would be an easy and expensive mistake.
+```powershell
+dotnet run --project src/EvalRunner -- tier3              # run the set once, then judge
+dotnet run --project src/EvalRunner -- tier3 --run PATH   # judge trajectories already recorded
+```
 
-A measured run, 8 cases at 2 repetitions:
+`--run` reuses a saved artifact, so a trajectory recorded by Tier 2 can be judged without paying for
+the agent a second time. The same rule the triad follows: never buy the same response twice.
+
+**It reports, it does not gate.** The judge was measured flipping verdicts on identical input, so a
+score here is evidence for a human to read, never a merge decision. The scales differ deliberately
+and are labelled, because reading a 0.75 pass rate as a poor 1-5 rating would be an easy mistake.
+
+A measured run over 8 cases:
 
 | Metric | mean | sd | min | weak cases |
 | --- | --- | --- | --- | --- |
-| Intent Resolution | 4.38 | 0.70 | 3.0 | refund-over-limit |
-| Task Adherence | 3.38 | 0.99 | 2.0 | 4 of 8 cases |
+| Intent Resolution | 4.25 | 0.83 | 3.0 | 2 of 8 |
+| Task Adherence | 4.00 | 0.87 | 3.0 | 3 of 8 |
 | Tool Call Accuracy | 1.00 | 0.00 | 1.0 | none |
 
-Task Adherence found a systemic weakness no pass or fail check could see: across half the golden set
-the agent was docked for describing what it would do rather than calling the tools it had been given.
-The same weakness surfaced separately as a flaky case, where the agent called the tool on one run and
-narrated on the next.
+Task Adherence found a systemic weakness no pass or fail check could see: repeatedly, the agent was
+docked for describing what it would do rather than calling the tools it had been given.
 
-### Reliability
+## Incident replay
 
-**Scheduled**: many repetitions, Wilson 95% intervals, per-case flakiness, drift against a baseline.
-With 5 passes out of 5 the naive interval reads 100% to 100%; Wilson reads roughly 57% to 100%,
-which correctly says no reliability claim has been earned yet.
+Not a tier. A diagnostic against one captured production trace, run when something has gone wrong:
 
-Repeated runs bypass the response cache. Caching is what makes a judge affordable per pull request,
-but it is fatal here: identical prompts return one stored answer, every repetition agrees, and the
-interval is computed over copies of a single observation. That does not look broken, it looks
-confident.
+```powershell
+dotnet run --project src/EvalRunner -- incident --trace incidents/sample-incident.json
+```
 
-Measured, 8 cases at 5 repetitions: 100% pass rate, overall 95% CI 86.7% to 100%, no flaky cases,
-and 5 of 5 textually distinct responses per case. The agent varies in wording and holds in behaviour,
-which is exactly the distinction this tier separates. Note the per-case interval is 57% to 100%: five
-observations support the pooled figure, not a per-case claim.
-
-Tier 3 is scheduled rather than blocking because it is imprecise per change, not because it is
-costly. It runs no judge, so a run costs a few tenths of a cent, far less than Tier 2. But a per-case
-interval spanning 57% to 100% cannot attribute a regression to a single pull request, and the tier
-answers a question about the agent over time rather than about one diff.
-
-**Incident replay** (`--incident`) runs a captured production trace against today's rules, fully
-offline. Two useful outcomes: the rules catch it, meaning the guard now covers what production
-missed; or nothing catches it, meaning a golden case is needed or a recurrence will also slip
-through.
-
+Fully offline unless `--judge` is passed. Two useful outcomes: today''s rules catch it, meaning the
+guard now covers what production missed; or nothing catches it, meaning a golden case is needed or a
+recurrence will slip through too.
 ## Judge calibration
 
 Thresholds are meaningful only if the judge's 3 means what a reviewer's 3 means.
@@ -368,6 +358,8 @@ Every entry below was found by the evaluation, not by review.
 | Prompt injection through the corpus succeeded | The tool guard stopped the side effect anyway |
 | Hardening against injection suppressed tool use | Two evals in tension, both necessary |
 | A rule demanded `escalate`, agent said `escalation` | A fragile word list punishes correct behaviour |
+| The same list then failed on "additional approval" | Patching synonyms three times means the rule tests phrasing, not meaning |
+| The agent paid out 500 against a 4000 request | Per-call validation is blind to structuring; the guard needed the conversation |
 | The agent offered to split a 4000 refund into 500 chunks | A rule checking wording cannot see a control being structured around |
 | Tool call accuracy silently scored null | It returns a boolean metric, not numeric; the judge worked, my unwrapping did not |
 | Task adherence flagged 4 of 8 cases | The agent narrates tool use instead of calling tools, invisible to pass or fail |
@@ -392,6 +384,9 @@ Every entry below was found by the evaluation, not by review.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+
+
+
 
 
 

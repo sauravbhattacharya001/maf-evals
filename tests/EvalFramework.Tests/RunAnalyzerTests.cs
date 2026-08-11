@@ -9,7 +9,6 @@ public sealed class RunAnalyzerTests
 {
     private static readonly EvalConfig Config = new()
     {
-        Tier3Repetitions = 4,
         MinOverallPassRate = 0.50,
         MinCriticalCasePassRate = 1.00,
         MinStandardCasePassRate = 0.50
@@ -43,7 +42,7 @@ public sealed class RunAnalyzerTests
     };
 
     private static RunArtifact Build(params ResponseRecord[] records) =>
-        AgentRunner.Build([Critical, Standard], records, Config.Tier3Repetitions, "tier3", "test-model", "test.jsonl");
+        AgentRunner.Build([Critical, Standard], records, 4, "tier3", "test-model", "test.jsonl");
 
     [Fact]
     public void IntermittentFailureIsReportedAsFlaky()
@@ -131,6 +130,7 @@ public sealed class RunAnalyzerTests
         Assert.Contains("min_length x2", statistics.TopFailures);
     }
 }
+
 
 
 

@@ -88,7 +88,8 @@ public static class SupportAgentFactory
         ToolGuard toolGuard = new(
             SupportPolicy.ToolRules,
             outcome => recorder.RecordToolCall(
-                new ToolCallRecord(outcome.ToolName, outcome.Arguments, outcome.Rejected)));
+                new ToolCallRecord(outcome.ToolName, outcome.Arguments, outcome.Rejected)),
+            SupportPolicy.ToolContextRuleSet);
 
         AIAgent agent = new AIAgentBuilder(inner)
             .Use(
@@ -107,6 +108,7 @@ public static class SupportAgentFactory
         return (agent, recorder);
     }
 }
+
 
 
 

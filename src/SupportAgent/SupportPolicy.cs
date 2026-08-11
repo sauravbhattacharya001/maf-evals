@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using EvalFramework.Rules;
 using Microsoft.Extensions.AI;
+using SupportAgent.Guardrails;
 
 namespace SupportAgent;
 
@@ -55,6 +56,18 @@ public static class SupportPolicy
         }
     ];
 
+    /// <summary>Refund limit an agent may approve without a supervisor, per corpus/refunds.md.</summary>
+    public const double RefundLimit = 500;
+
+    /// <summary>
+    /// Rules that need the conversation. Argument validation alone allowed a 500 payout against a
+    /// 4000 request, because each call was individually within policy.
+    /// </summary>
+    public static IReadOnlyList<ToolContextRule> ToolContextRuleSet { get; } =
+    [
+        ToolContextRules.NoPartialPayoutAboveLimit(IssueRefundTool, RefundLimit)
+    ];
+
     /// <summary>
     /// Stand-in tools so the tool guard has something real to protect.
     /// </summary>
@@ -85,4 +98,6 @@ public static class SupportPolicy
         [Description("One of: damaged, duplicate, not_delivered.")] string reason) =>
         $"Refund of {amount} issued for order {orderId} ({reason}).";
 }
+
+
 
