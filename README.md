@@ -68,6 +68,22 @@ Each triad metric separates a distinct failure: retrieval catches a bad knowledg
 groundedness catches invention beyond the context, relevance catches well-grounded answers that
 miss the question. A single quality score would blur all three.
 
+### Tool calls are checked, not judged
+
+Tool choice is recorded in the trace, so it is a fact to compare rather than a judgement to score:
+
+```json
+"expectedToolCalls": [{ "name": "issue_refund", "arguments": { "orderId": "A-31905", "amount": 120 } }],
+"forbiddenToolCalls": ["issue_refund"]
+```
+
+Arguments match as a subset, so extra arguments are harmless while the named ones must be right. A
+call a guard rejected never satisfies an expectation, and never violates a prohibition either: that
+keeps "escalated correctly" distinct from "tried and was stopped", which a pass rate alone cannot
+separate. `ToolCallAccuracyEvaluator` exists in the quality library and is deliberately unused;
+paying a judge that flips 17% of verdicts to confirm something exactly checkable would be worse on
+both cost and reliability.
+
 ### Threshold bands
 
 A judge is stochastic, so a single cut-off makes a borderline score a coin flip that blocks a merge.
@@ -106,7 +122,7 @@ offline. The outcomes are:
 ## Quick start
 
 ```powershell
-dotnet test                                     # 194 offline tests
+dotnet test                                     # 224 offline tests
 dotnet run --project src/EvalRunner -- rules    # rule engine over frozen responses
 dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
 ```
@@ -131,6 +147,7 @@ dotnet run --project src/EvalRunner -- tier3 --repetitions 5
 | `tier3 [--repetitions N]` | Scheduled reliability run |
 | `tier3 --incident PATH [--judge]` | Replay a production trace |
 | `report [--run PATH]` | Print a saved run artifact |
+| `retrieve --query "..." [--top N]` | Inspect retrieval offline while authoring a case |
 | `calibrate [--repeat N] [--case ID]` | Score the judge against human labels; `--repeat` measures self-consistency |
 
 Exit codes: `0` pass, `1` gate failure, `2` configuration error.
@@ -312,6 +329,14 @@ guards exist to keep that honest:
 Mutation check: forcing every rule to pass breaks 31 of the tests. Line coverage is 86.6%, branch
 74.3%, collected on every pull request.
 
+Adding tool-calling cases to the golden set immediately exposed four defects that unit tests had
+missed: the tools were registered under their C# method names (`LookupOrder`) while the rules used
+`lookup_order`, so the tool guard had been inert in every real run; the telemetry recorder handed
+out its live list, so resetting before the next case erased calls already captured against the
+previous one; the tokeniser had no stemming, so a customer asking about a `refund` never matched a
+policy about `refunds`, hiding the refund-limits section from every refund query; and the plural
+rule stemmed `charges` to `charg` while leaving `charge` whole.
+
 ### Concurrency boundary
 
 Judging is parallel with a bounded budget; running the agent is deliberately sequential. Telemetry
@@ -374,6 +399,8 @@ gate reports that it could not be enforced instead of silently passing.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+
+
 
 
 

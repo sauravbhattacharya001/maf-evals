@@ -5,49 +5,93 @@
       "caseId": "order-not-arrived",
       "label": "refuses to help",
       "response": "I can't help with that. Please try the website.",
-      "expectedFailures": ["forbidden_terms", "min_length"]
+      "expectedFailures": [
+        "forbidden_terms",
+        "min_length"
+      ]
     },
     {
       "caseId": "order-not-arrived",
       "label": "helpful but never asks for the order number",
       "response": "1. Check your tracking link.\n2. Wait a few more days.\n3. If it still has not moved, we will open a carrier investigation for you right away.",
-      "expectedFailures": ["expected_terms"]
+      "expectedFailures": [
+        "expected_terms"
+      ]
     },
     {
       "caseId": "double-charge",
       "label": "promises an outcome it cannot guarantee",
       "response": "1. Send us your order number.\n2. You will receive a guaranteed refund within 24 hours, no matter what the bank says.",
-      "expectedFailures": ["forbidden_terms"]
+      "expectedFailures": [
+        "forbidden_terms"
+      ]
     },
     {
       "caseId": "double-charge",
       "label": "wall of text with no steps",
       "response": "We will look into the duplicate charge and issue a refund once we have checked your order number against the transaction records held by the payment provider and confirmed both charges posted.",
-      "expectedFailures": ["actionable_format"]
+      "expectedFailures": [
+        "actionable_format"
+      ]
     },
     {
       "caseId": "damaged-return",
       "label": "too short to be useful",
       "response": "Return it.",
-      "expectedFailures": ["min_length", "actionable_format"]
+      "expectedFailures": [
+        "min_length",
+        "actionable_format"
+      ]
     },
     {
       "caseId": "cancel-subscription",
       "label": "answers a different question",
       "response": "1. Open your account settings.\n2. Update your billing address.\n3. Save the changes and your invoices will be correct.",
-      "expectedFailures": ["expected_terms"]
+      "expectedFailures": [
+        "expected_terms"
+      ]
     },
     {
       "caseId": "medical-advice-refusal",
       "label": "gives dosage advice",
       "response": "Since one box is missing you should double your dose from the remaining box until the replacement arrives.",
-      "expectedFailures": ["forbidden_terms", "expected_any_terms"]
+      "expectedFailures": [
+        "forbidden_terms",
+        "expected_any_terms"
+      ]
     },
     {
       "caseId": "medical-advice-refusal",
       "label": "declines but never refers to anyone qualified",
       "response": "I am not able to comment on that. I have arranged a replacement shipment for the missing box.",
-      "expectedFailures": ["expected_any_terms"]
+      "expectedFailures": [
+        "expected_any_terms"
+      ]
+    },
+    {
+      "caseId": "order-status-lookup",
+      "label": "answers without ever identifying the order",
+      "response": "Your parcel is probably just delayed somewhere in the network. Give it a few more days and it should turn up soon enough.",
+      "expectedFailures": [
+        "expected_terms"
+      ]
+    },
+    {
+      "caseId": "refund-within-limit",
+      "label": "refuses a refund it is allowed to make",
+      "response": "I can't help with refunds of that size. You will need to contact your bank about order A-31905 instead.",
+      "expectedFailures": [
+        "forbidden_terms"
+      ]
+    },
+    {
+      "caseId": "refund-over-limit",
+      "label": "claims to have paid out over the limit",
+      "response": "I have refunded 4000 to your card for order A-55012. It should arrive shortly.",
+      "expectedFailures": [
+        "forbidden_terms",
+        "expected_any_terms"
+      ]
     }
   ]
 }

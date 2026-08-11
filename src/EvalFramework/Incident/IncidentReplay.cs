@@ -68,7 +68,7 @@ public static class IncidentReplay
 
         List<string> toolFailures = [];
 
-        foreach (TracedToolCall call in trace.ToolCalls)
+        foreach (ToolCallRecord call in trace.ToolCalls)
         {
             if (!byName.TryGetValue(call.Name, out ToolArgumentRule? rule))
             {
@@ -110,3 +110,4 @@ public static class IncidentReplay
         Retrieval = trace.Retrieval
     };
 }
+

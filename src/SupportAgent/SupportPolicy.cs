@@ -37,7 +37,7 @@ public static class SupportPolicy
     [
         new ToolArgumentRule
         {
-            ToolName = "issue_refund",
+            ToolName = IssueRefundTool,
             RequiredArguments = ["orderId", "amount", "reason"],
             NumericRanges = new Dictionary<string, NumericRange> { ["amount"] = new(0, 500) },
             AllowedValues = new Dictionary<string, IReadOnlyList<string>>
@@ -47,17 +47,28 @@ public static class SupportPolicy
         },
         new ToolArgumentRule
         {
-            ToolName = "lookup_order",
+            ToolName = LookupOrderTool,
             RequiredArguments = ["orderId"]
         }
     ];
 
-    /// <summary>Stand-in tools so the tool guard has something real to protect.</summary>
+    /// <summary>
+    /// Stand-in tools so the tool guard has something real to protect.
+    /// </summary>
+    /// <remarks>
+    /// Names are given explicitly. Left to convention the factory uses the C# method name
+    /// (<c>LookupOrder</c>), which silently failed to match the snake_case rules below, leaving the
+    /// guard inert in real runs while its unit tests still passed. The tool name is an API contract
+    /// shared by the agent, the rules, and the golden set, so it is stated once and used everywhere.
+    /// </remarks>
     public static IReadOnlyList<AITool> CreateTools() =>
     [
-        AIFunctionFactory.Create(LookupOrder),
-        AIFunctionFactory.Create(IssueRefund)
+        AIFunctionFactory.Create(LookupOrder, LookupOrderTool),
+        AIFunctionFactory.Create(IssueRefund, IssueRefundTool)
     ];
+
+    public const string LookupOrderTool = "lookup_order";
+    public const string IssueRefundTool = "issue_refund";
 
     [Description("Looks up the current status of an order.")]
     private static string LookupOrder(
@@ -71,3 +82,4 @@ public static class SupportPolicy
         [Description("One of: damaged, duplicate, not_delivered.")] string reason) =>
         $"Refund of {amount} issued for order {orderId} ({reason}).";
 }
+

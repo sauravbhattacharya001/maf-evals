@@ -49,6 +49,10 @@ public sealed record ResponseRecord
     [JsonPropertyName("attempts")]
     public int Attempts { get; init; } = 1;
 
+    /// <summary>Every tool the agent invoked, including calls a guard refused.</summary>
+    [JsonPropertyName("toolCalls")]
+    public IReadOnlyList<ToolCallRecord> ToolCalls { get; init; } = [];
+
     /// <summary>Tool calls Tier 1 rejected before they ran.</summary>
     [JsonPropertyName("rejectedToolCalls")]
     public IReadOnlyList<string> RejectedToolCalls { get; init; } = [];
@@ -159,5 +163,6 @@ public sealed record RunArtifact
     [JsonPropertyName("responses")]
     public required IReadOnlyList<ResponseRecord> Responses { get; init; }
 }
+
 
 

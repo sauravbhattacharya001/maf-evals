@@ -61,12 +61,14 @@ public sealed class KeywordRetriever : IRetriever
     /// </remarks>
     private static readonly Dictionary<string, string[]> Expansions = new(StringComparer.Ordinal)
     {
-        ["arrived"] = ["delivery", "delivered", "parcel", "tracking", "delayed"],
-        ["arrive"] = ["delivery", "delivered", "parcel", "tracking", "delayed"],
         // "missing" and "lost" are deliberately not expanded to parcel vocabulary. Calibration
         // showed the medication query ("one box was missing") pulling in the delayed-parcel policy,
         // which the judge correctly scored as noise. A term that is ambiguous across domains costs
         // more precision than the recall it buys.
+        ["arrived"] = ["delivery", "delivered", "parcel", "tracking", "delayed"],
+        ["arrive"] = ["delivery", "delivered", "parcel", "tracking", "delayed"],
+        ["status"] = ["tracking", "delivery", "delayed", "parcel"],
+        ["update"] = ["tracking", "delayed"],
         ["late"] = ["delayed", "tracking", "parcel"],
         ["charged"] = ["charge", "payment", "authorisation", "duplicate"],
         ["twice"] = ["duplicate", "charge"],
@@ -151,21 +153,23 @@ public sealed class KeywordRetriever : IRetriever
     {
         Dictionary<string, double> weights = new(StringComparer.Ordinal);
 
-        foreach (string term in Tokenize(query))
+        foreach (string raw in RawTokens(query))
         {
-            weights[term] = 1d;
+            weights[Stem(raw)] = 1d;
 
-            if (!Expansions.TryGetValue(term, out string[]? expansions))
+            if (!Expansions.TryGetValue(raw, out string[]? expansions))
             {
                 continue;
             }
 
             foreach (string expansion in expansions)
             {
+                string stemmed = Stem(expansion);
+
                 // A literal match always outranks an expanded one.
-                if (!weights.ContainsKey(expansion))
+                if (!weights.ContainsKey(stemmed))
                 {
-                    weights[expansion] = ExpansionWeight;
+                    weights[stemmed] = ExpansionWeight;
                 }
             }
         }
@@ -173,7 +177,9 @@ public sealed class KeywordRetriever : IRetriever
         return weights;
     }
 
-    internal static IEnumerable<string> Tokenize(string text)
+    internal static IEnumerable<string> Tokenize(string text) => RawTokens(text).Select(Stem);
+
+    private static IEnumerable<string> RawTokens(string text)
     {
         return text
             .Split(
@@ -182,5 +188,61 @@ public sealed class KeywordRetriever : IRetriever
             .Select(token => token.ToLowerInvariant())
             .Where(token => token.Length >= 3 && !StopWords.Contains(token));
     }
+
+    /// <summary>
+    /// A deliberately small suffix stemmer.
+    /// </summary>
+    /// <remarks>
+    /// Without it a customer asking for a "refund" never matches a policy about "refunds", and
+    /// "order" never matches "orders". That gap hid the refund-limits policy from every refund
+    /// query, which is the sort of failure that looks like a model problem and is really a
+    /// tokenisation problem. Applied identically to corpus and query, so the two always meet in the
+    /// same form; full morphological stemming would buy little more on a corpus this size.
+    /// </remarks>
+    internal static string Stem(string token)
+    {
+        if (token.Length > 4 && token.EndsWith("ies", StringComparison.Ordinal))
+        {
+            return string.Concat(token.AsSpan(0, token.Length - 3), "y");
+        }
+
+        if (token.Length > 4 && token.EndsWith("ing", StringComparison.Ordinal))
+        {
+            return token[..^3];
+        }
+
+        if (token.Length > 4 && token.EndsWith("ed", StringComparison.Ordinal))
+        {
+            return token[..^2];
+        }
+
+        // "boxes" drops "es" because the stem ends in a sibilant, but "charges" drops only the "s",
+        // otherwise it would stem to "charg" while "charge" stayed whole and the two never met.
+        if (token.Length > 4 && token.EndsWith("es", StringComparison.Ordinal))
+        {
+            string withoutS = token[..^1];
+
+            return EndsWithSibilant(token[..^2]) ? token[..^2] : withoutS;
+        }
+
+        if (token.Length > 3
+            && token.EndsWith('s')
+            && !token.EndsWith("ss", StringComparison.Ordinal))
+        {
+            return token[..^1];
+        }
+
+        return token;
+    }
+
+    private static bool EndsWithSibilant(string stem) =>
+        stem.EndsWith('s') || stem.EndsWith('x') || stem.EndsWith('z')
+        || stem.EndsWith("ch", StringComparison.Ordinal) || stem.EndsWith("sh", StringComparison.Ordinal);
 }
+
+
+
+
+
+
 

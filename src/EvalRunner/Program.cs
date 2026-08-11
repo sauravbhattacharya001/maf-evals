@@ -26,6 +26,7 @@ try
         "tier2" => await Tier2Async(cli),
         "tier3" => await Tier3Async(cli),
         "report" => Report(cli),
+        "retrieve" => Retrieve(cli),
         "calibrate" => await CalibrateAsync(cli),
         _ => Help()
     };
@@ -75,6 +76,30 @@ static int Rules()
 
     Console.WriteLine($"\n{cases.Count - failures}/{cases.Count} cases passed");
     return failures == 0 ? 0 : 1;
+}
+
+// Offline retrieval inspection. Authoring a case means knowing what the retriever returns for it.
+static int Retrieve(CommandLine cli)
+{
+    string query = cli.Option("--query")
+        ?? throw new InvalidOperationException("Pass --query \"...\" to inspect retrieval.");
+
+    KeywordRetriever retriever = KeywordRetriever.FromDirectory(RepoPaths.Corpus);
+    EvalFramework.Retrieval.RetrievalTrace trace = retriever.Retrieve(query, cli.IntOption("--top") ?? 5);
+
+    Console.WriteLine($"query: {query}\n");
+
+    foreach (EvalFramework.Retrieval.RetrievedChunk chunk in trace.Chunks)
+    {
+        Console.WriteLine($"  {chunk.Score,6:F2}  {chunk.Id,-20} {chunk.Title}");
+    }
+
+    if (trace.Chunks.Count == 0)
+    {
+        Console.WriteLine("  (nothing retrieved)");
+    }
+
+    return 0;
 }
 
 // Tier 2: the pull-request gate. One pass per case, rules plus the RAG triad.
@@ -349,6 +374,7 @@ static int Help()
 
     return 0;
 }
+
 
 
 

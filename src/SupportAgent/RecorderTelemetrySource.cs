@@ -15,9 +15,8 @@ public sealed class RecorderTelemetrySource(GuardrailRecorder recorder) : IRunTe
     {
         RetrievalTrace? retrieval = recorder.LastRetrieval;
         int attempts = recorder.LastResponse?.Attempts ?? 1;
-        string[] rejected = recorder.RejectedToolCalls.Select(outcome => outcome.ToolName).ToArray();
-
-        return new RunTelemetry(retrieval, attempts, rejected);
+        return new RunTelemetry(retrieval, attempts, recorder.ToolCalls);
     }
 }
+
 

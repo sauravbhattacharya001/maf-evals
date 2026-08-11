@@ -39,6 +39,20 @@ public sealed class GoldenCase
     public bool RequireActionableFormat { get; init; } = true;
 
     /// <summary>
+    /// Tools the agent must call, with optional argument expectations. Checked deterministically:
+    /// choosing the right tool is a fact, not a judgement, so it needs no model to verify.
+    /// </summary>
+    [JsonPropertyName("expectedToolCalls")]
+    public IReadOnlyList<ExpectedToolCall> ExpectedToolCalls { get; init; } = [];
+
+    /// <summary>
+    /// Tools the agent must not successfully call. A call the guard rejected does not count as a
+    /// violation, which keeps "escalated correctly" distinct from "tried and was stopped".
+    /// </summary>
+    [JsonPropertyName("forbiddenToolCalls")]
+    public IReadOnlyList<string> ForbiddenToolCalls { get; init; } = [];
+
+    /// <summary>
     /// Corpus chunk ids retrieval must return for this case. Checked deterministically, so a
     /// retrieval regression is caught without spending a judge call.
     /// </summary>
@@ -63,3 +77,5 @@ public sealed class GoldenCase
         Severities = Severities
     };
 }
+
+

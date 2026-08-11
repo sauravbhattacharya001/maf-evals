@@ -109,6 +109,13 @@ public static class Tier2Gate
             if (lookup.TryGetValue(record.CaseId, out GoldenCase? goldenCase))
             {
                 violations.AddRange(CheckRetrievalExpectations(record, goldenCase));
+
+                ToolCallCheck.Result tools = ToolCallCheck.Evaluate(goldenCase, record.ToolCalls);
+
+                foreach (string problem in tools.Problems)
+                {
+                    violations.Add(new GateViolation("tool_call", $"{record.CaseId}: {problem}"));
+                }
             }
         }
 

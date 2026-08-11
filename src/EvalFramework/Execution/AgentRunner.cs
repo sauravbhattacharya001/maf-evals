@@ -12,7 +12,7 @@ namespace EvalFramework.Execution;
 public sealed record RunTelemetry(
     RetrievalTrace? Retrieval,
     int Attempts,
-    IReadOnlyList<string> RejectedToolCalls);
+    IReadOnlyList<ToolCallRecord> ToolCalls);
 
 /// <summary>
 /// Supplies Tier 1 telemetry to the runner.
@@ -160,7 +160,8 @@ public sealed class AgentRunner(
             Rules = rules,
             Retrieval = captured.Retrieval,
             Attempts = captured.Attempts,
-            RejectedToolCalls = captured.RejectedToolCalls,
+            ToolCalls = captured.ToolCalls,
+            RejectedToolCalls = captured.ToolCalls.Where(call => call.Rejected).Select(call => call.Name).ToArray(),
             Outcome = outcome,
             Error = error
         };
@@ -202,4 +203,5 @@ public sealed class AgentRunner(
         };
     }
 }
+
 

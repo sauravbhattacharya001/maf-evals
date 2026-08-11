@@ -1,13 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using EvalFramework.Execution;
 using EvalFramework.Retrieval;
 
 namespace EvalFramework.Incident;
-
-/// <summary>A tool call as it happened in production.</summary>
-public sealed record TracedToolCall(
-    [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("arguments")] IReadOnlyDictionary<string, object?> Arguments);
 
 /// <summary>
 /// One captured production interaction, replayed by Tier 3 after an incident.
@@ -44,7 +40,7 @@ public sealed record IncidentTrace
     public RetrievalTrace? Retrieval { get; init; }
 
     [JsonPropertyName("toolCalls")]
-    public IReadOnlyList<TracedToolCall> ToolCalls { get; init; } = [];
+    public IReadOnlyList<ToolCallRecord> ToolCalls { get; init; } = [];
 
     public static IncidentTrace Load(string path)
     {
@@ -54,3 +50,4 @@ public sealed record IncidentTrace
             ?? throw new InvalidDataException($"{path} is not a valid incident trace.");
     }
 }
+
