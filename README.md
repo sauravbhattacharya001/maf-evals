@@ -16,7 +16,7 @@ answer different questions.
 | Runs | inside the agent, every request | CI, every pull request | scheduled, or after an incident |
 | Asks | can this response go out? | may this change merge? | how reliable is it, and what went wrong? |
 | Checks | tool arguments, then final response | rules, retrieval, tool calls, RAG triad | repetition, confidence intervals, replay |
-| Model calls | none of its own | candidate and judge, cached | candidate and judge, many |
+| Model calls | none of its own | candidate and judge, cached | candidate only, uncached |
 | On failure | retry, then per-rule severity | block the merge | report and explain |
 
 ## Principles
@@ -149,6 +149,11 @@ Measured, 8 cases at 5 repetitions: 100% pass rate, overall 95% CI 86.7% to 100%
 and 5 of 5 textually distinct responses per case. The agent varies in wording and holds in behaviour,
 which is exactly the distinction this tier separates. Note the per-case interval is 57% to 100%: five
 observations support the pooled figure, not a per-case claim.
+
+Tier 3 is scheduled rather than blocking because it is imprecise per change, not because it is
+costly. It runs no judge, so a run costs a few tenths of a cent, far less than Tier 2. But a per-case
+interval spanning 57% to 100% cannot attribute a regression to a single pull request, and the tier
+answers a question about the agent over time rather than about one diff.
 
 **Incident replay** (`--incident`) runs a captured production trace against today's rules, fully
 offline. Two useful outcomes: the rules catch it, meaning the guard now covers what production
@@ -352,3 +357,5 @@ Every entry below was found by the evaluation, not by review.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+
+

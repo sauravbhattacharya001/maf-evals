@@ -70,7 +70,10 @@ jobs:
           echo "Tier 2 was skipped: fork pull requests cannot access model credentials."
           echo "A maintainer must run it from a branch in this repository before merging."
 
-  # Tier 3 is expensive and statistical, so it is scheduled rather than blocking.
+  # Tier 3 is scheduled rather than blocking because it is imprecise per change, not because it is
+  # costly: it runs no judge, so a run is a few tenths of a cent. At 5 repetitions the per-case
+  # interval spans 57% to 100%, far too wide to attribute a regression to one pull request. It also
+  # bypasses the cache by design, so it is the one tier whose wall-clock never improves.
   tier3:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -93,5 +96,6 @@ jobs:
         with:
           name: tier3-artifacts
           path: artifacts/runs/
+
 
 
