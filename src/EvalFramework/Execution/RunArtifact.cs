@@ -4,6 +4,19 @@ using EvalFramework.Rules;
 
 namespace EvalFramework.Execution;
 
+/// <summary>How a single agent invocation ended.</summary>
+public enum ResponseOutcome
+{
+    /// <summary>The agent returned a response.</summary>
+    Completed,
+
+    /// <summary>Tier 1 refused to release the response. A real, countable outcome.</summary>
+    Blocked,
+
+    /// <summary>The call failed for reasons unrelated to the agent, such as a rate limit.</summary>
+    Errored
+}
+
 /// <summary>
 /// One agent invocation, retained so the triad and Tier 3 never have to rerun the agent.
 /// </summary>
@@ -39,9 +52,23 @@ public sealed record ResponseRecord
     [JsonPropertyName("rejectedToolCalls")]
     public IReadOnlyList<string> RejectedToolCalls { get; init; } = [];
 
-    /// <summary>Set when Tier 1 blocked the response outright.</summary>
-    [JsonPropertyName("blocked")]
-    public bool Blocked { get; init; }
+    /// <summary>How the invocation ended. Errors are missing data, not measurements.</summary>
+    [JsonPropertyName("outcome")]
+    public ResponseOutcome Outcome { get; init; } = ResponseOutcome.Completed;
+
+    /// <summary>Populated only when <see cref="Outcome"/> is <see cref="ResponseOutcome.Errored"/>.</summary>
+    [JsonPropertyName("error")]
+    public string? Error { get; init; }
+
+    [JsonIgnore]
+    public bool Blocked => Outcome == ResponseOutcome.Blocked;
+
+    [JsonIgnore]
+    public bool Errored => Outcome == ResponseOutcome.Errored;
+
+    /// <summary>Only completed and blocked runs are evidence about the agent.</summary>
+    [JsonIgnore]
+    public bool Counts => Outcome != ResponseOutcome.Errored;
 }
 
 /// <summary>Per-case aggregate across repetitions.</summary>
@@ -82,7 +109,7 @@ public sealed record CaseStatistics
 /// <summary>Versioned run artifact. Input to the triad, to Tier 3, and to reporting.</summary>
 public sealed record RunArtifact
 {
-    public const string CurrentSchemaVersion = "run/v2";
+    public const string CurrentSchemaVersion = "run/v3";
 
     [JsonPropertyName("schemaVersion")]
     public string SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -105,6 +132,10 @@ public sealed record RunArtifact
     [JsonPropertyName("repetitions")]
     public required int Repetitions { get; init; }
 
+    /// <summary>Invocations excluded because they failed for infrastructure reasons.</summary>
+    [JsonPropertyName("erroredCount")]
+    public int ErroredCount { get; init; }
+
     [JsonPropertyName("overallPassRate")]
     public required double OverallPassRate { get; init; }
 
@@ -123,3 +154,4 @@ public sealed record RunArtifact
     [JsonPropertyName("responses")]
     public required IReadOnlyList<ResponseRecord> Responses { get; init; }
 }
+

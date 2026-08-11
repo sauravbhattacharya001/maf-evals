@@ -78,9 +78,24 @@ public sealed class TriadEvaluator(IChatClient judgeClient, TriadThresholds? thr
         IEnumerable<EvaluationContext>? context,
         CancellationToken cancellationToken)
     {
-        EvaluationResult result = await evaluator
-            .EvaluateAsync(messages, response, configuration, context, cancellationToken)
-            .ConfigureAwait(false);
+        EvaluationResult result;
+
+        try
+        {
+            result = await evaluator
+                .EvaluateAsync(messages, response, configuration, context, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // A judge failure is missing data for one metric. Letting it propagate would discard
+            // every result already paid for in this run, and a whole-run retry would pay twice.
+            return [new TriadScore(
+                MetricNameFor(evaluator),
+                null,
+                TriadVerdict.NotScored,
+                $"judge call failed: {error.Message}")];
+        }
 
         return result.Metrics.Select(entry =>
         {
@@ -93,4 +108,13 @@ public sealed class TriadEvaluator(IChatClient judgeClient, TriadThresholds? thr
                 entry.Value.Reason);
         });
     }
+
+    /// <summary>Names the metric a failed evaluator would have produced, so the gap is visible.</summary>
+    private static string MetricNameFor(IEvaluator evaluator) => evaluator switch
+    {
+        RetrievalEvaluator => TriadMetrics.Retrieval,
+        GroundednessEvaluator => TriadMetrics.Groundedness,
+        RelevanceEvaluator => TriadMetrics.Relevance,
+        _ => evaluator.GetType().Name
+    };
 }

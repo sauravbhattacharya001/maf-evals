@@ -76,7 +76,8 @@ public sealed class AgentRunner(AIAgent agent, string model, IRunTelemetrySource
         long start = Stopwatch.GetTimestamp();
 
         string text;
-        bool blocked = false;
+        ResponseOutcome outcome = ResponseOutcome.Completed;
+        string? error = null;
 
         try
         {
@@ -86,21 +87,35 @@ public sealed class AgentRunner(AIAgent agent, string model, IRunTelemetrySource
 
             text = response.Text ?? string.Empty;
         }
-        catch (Exception error) when (error is not OperationCanceledException)
+        catch (Exception blocked) when (blocked is IRuleBlockedException)
         {
-            // A Tier 1 block is a legitimate outcome to measure, not a crash to hide.
-            blocked = true;
+            // A Tier 1 block is a legitimate outcome to measure.
+            outcome = ResponseOutcome.Blocked;
             text = string.Empty;
-            progress?.Report($"{goldenCase.Id}: blocked by guardrails ({error.Message})");
+            error = blocked.Message;
+            progress?.Report($"{goldenCase.Id}: blocked by guardrails");
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            // Anything else is missing data. Counting it as a failure would let an API outage
+            // masquerade as an agent regression.
+            outcome = ResponseOutcome.Errored;
+            text = string.Empty;
+            error = failure.Message;
+            progress?.Report($"{goldenCase.Id}: ERRORED ({failure.GetType().Name}: {failure.Message})");
         }
 
         double latencyMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         RunTelemetry captured = telemetry?.Capture() ?? new RunTelemetry(null, 1, []);
         RuleReport rules = ResponseRules.Evaluate(goldenCase.ToRuleSet(), text);
 
-        progress?.Report(
-            $"rep {repetition} {goldenCase.Id}: {(rules.Passed && !blocked ? "pass" : "fail")} " +
-            $"({latencyMs:F0} ms, {captured.Attempts} attempt(s))");
+        if (outcome != ResponseOutcome.Errored)
+        {
+            progress?.Report(
+                $"rep {repetition} {goldenCase.Id}: " +
+                $"{(rules.Passed && outcome == ResponseOutcome.Completed ? "pass" : "fail")} " +
+                $"({latencyMs:F0} ms, {captured.Attempts} attempt(s))");
+        }
 
         return new ResponseRecord
         {
@@ -113,7 +128,8 @@ public sealed class AgentRunner(AIAgent agent, string model, IRunTelemetrySource
             Retrieval = captured.Retrieval,
             Attempts = captured.Attempts,
             RejectedToolCalls = captured.RejectedToolCalls,
-            Blocked = blocked
+            Outcome = outcome,
+            Error = error
         };
     }
 
@@ -126,8 +142,12 @@ public sealed class AgentRunner(AIAgent agent, string model, IRunTelemetrySource
         string model,
         string datasetPath)
     {
-        int totalPasses = responses.Count(record => record.Rules.Passed && !record.Blocked);
-        ConfidenceInterval overall = Wilson.Interval(totalPasses, responses.Count);
+        // Errored runs are missing data: they are excluded from the denominator rather than
+        // counted as failures, and surfaced separately so a silent outage cannot be mistaken
+        // for a healthy run with a low score.
+        ResponseRecord[] counted = responses.Where(record => record.Counts).ToArray();
+        int totalPasses = counted.Count(record => record.Rules.Passed && !record.Blocked);
+        ConfidenceInterval overall = Wilson.Interval(totalPasses, counted.Length);
 
         return new RunArtifact
         {
@@ -137,10 +157,11 @@ public sealed class AgentRunner(AIAgent agent, string model, IRunTelemetrySource
             Model = model,
             DatasetPath = datasetPath,
             Repetitions = repetitions,
-            OverallPassRate = responses.Count == 0 ? 0d : (double)totalPasses / responses.Count,
+            ErroredCount = responses.Count - counted.Length,
+            OverallPassRate = counted.Length == 0 ? 0d : (double)totalPasses / counted.Length,
             OverallLowerBound = overall.Lower,
             OverallUpperBound = overall.Upper,
-            MeanLatencyMs = responses.Count == 0 ? 0d : responses.Average(record => record.LatencyMs),
+            MeanLatencyMs = counted.Length == 0 ? 0d : counted.Average(record => record.LatencyMs),
             Cases = RunAnalyzer.Summarize(cases, responses),
             Responses = responses
         };

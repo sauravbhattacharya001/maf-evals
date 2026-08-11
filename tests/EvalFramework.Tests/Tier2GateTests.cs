@@ -24,7 +24,7 @@ public sealed class Tier2GateTests
         GoldenCase goldenCase,
         string response = "a perfectly adequate answer",
         string[]? retrievedChunks = null,
-        bool blocked = false) => new()
+        ResponseOutcome outcome = ResponseOutcome.Completed) => new()
         {
             CaseId = goldenCase.Id,
             Query = goldenCase.Query,
@@ -32,7 +32,7 @@ public sealed class Tier2GateTests
             Response = response,
             LatencyMs = 10,
             Rules = ResponseRules.Evaluate(goldenCase.ToRuleSet(), response),
-            Blocked = blocked,
+            Outcome = outcome,
             Retrieval = new RetrievalTrace(
                 goldenCase.Query,
                 (retrievedChunks ?? []).Select(id => new RetrievedChunk(id, id, "text", 1)).ToArray())
@@ -127,7 +127,7 @@ public sealed class Tier2GateTests
     {
         GoldenCase good = Case("good");
         Tier2Result result = Tier2Gate.Apply(
-            Run([good], Record(good, response: string.Empty, blocked: true)),
+            Run([good], Record(good, response: string.Empty, outcome: ResponseOutcome.Blocked)),
             [good],
             [],
             Thresholds);
@@ -147,6 +147,31 @@ public sealed class Tier2GateTests
         Assert.True(result.Passed);
         Assert.Contains(result.Warnings, warning => warning.Contains("not scored", StringComparison.Ordinal));
     }
+    [Fact]
+    public void SkippingTheTriadIsLabelledPartialSoItCannotPassAsAFullGate()
+    {
+        GoldenCase good = Case("good");
+
+        Tier2Result full = Tier2Gate.Apply(Run([good], Record(good)), [good], [Triad("good", 5, 5, 5)], Thresholds);
+        Tier2Result partial = Tier2Gate.Apply(Run([good], Record(good)), [good], [], Thresholds, triadEvaluated: false);
+
+        Assert.Equal("PASSED", full.Verdict);
+        Assert.True(partial.Passed);
+        Assert.Contains("PARTIAL", partial.Verdict, StringComparison.Ordinal);
+        Assert.False(partial.TriadEvaluated);
+    }
+
+    [Fact]
+    public void AFailedPartialGateStillReadsAsFailed()
+    {
+        GoldenCase strict = new() { Id = "strict", Query = "q", MinLength = 500, RequireActionableFormat = false };
+
+        Tier2Result result = Tier2Gate.Apply(
+            Run([strict], Record(strict)), [strict], [], Thresholds, triadEvaluated: false);
+
+        Assert.Equal("FAILED", result.Verdict);
+    }
+
 
     [Theory]
     [InlineData(2.9, TriadVerdict.Fail)]
@@ -158,3 +183,5 @@ public sealed class Tier2GateTests
         Assert.Equal(expected, new ThresholdBand(3.0, 4.0).Classify(score));
     }
 }
+
+

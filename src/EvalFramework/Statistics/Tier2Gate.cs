@@ -8,6 +8,11 @@ namespace EvalFramework.Statistics;
 /// <summary>A Tier 2 run: what the agent did, what the judge thought, and whether it may merge.</summary>
 public sealed record Tier2Result
 {
+    public const string CurrentSchemaVersion = "tier2/v1";
+
+    [JsonPropertyName("schemaVersion")]
+    public string SchemaVersion { get; init; } = CurrentSchemaVersion;
+
     [JsonPropertyName("run")]
     public required RunArtifact Run { get; init; }
 
@@ -20,8 +25,27 @@ public sealed record Tier2Result
     [JsonPropertyName("warnings")]
     public required IReadOnlyList<string> Warnings { get; init; }
 
+    /// <summary>
+    /// False when the triad was skipped, so a cheap run cannot be mistaken for a full gate.
+    /// </summary>
+    /// <remarks>
+    /// A partial gate that prints an unqualified "PASSED" is how an unverified change reaches
+    /// main. The result records what was actually checked, not merely whether it complained.
+    /// </remarks>
+    [JsonPropertyName("triadEvaluated")]
+    public required bool TriadEvaluated { get; init; }
+
     [JsonIgnore]
     public bool Passed => Violations.Count == 0;
+
+    /// <summary>A gate that skipped its judge is a smoke test, not a verdict.</summary>
+    [JsonIgnore]
+    public string Verdict => (Passed, TriadEvaluated) switch
+    {
+        (false, _) => "FAILED",
+        (true, true) => "PASSED",
+        (true, false) => "PASSED (PARTIAL: triad skipped)"
+    };
 }
 
 /// <summary>
@@ -38,7 +62,8 @@ public static class Tier2Gate
         RunArtifact run,
         IReadOnlyList<GoldenCase> cases,
         IReadOnlyList<TriadResult> triad,
-        TriadThresholds thresholds)
+        TriadThresholds thresholds,
+        bool triadEvaluated = true)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(cases);
@@ -50,6 +75,15 @@ public static class Tier2Gate
 
         foreach (ResponseRecord record in run.Responses)
         {
+            if (record.Errored)
+            {
+                violations.Add(new GateViolation(
+                    "infrastructure",
+                    $"{record.CaseId}: invocation errored ({record.Error}). " +
+                    "The gate cannot pass on incomplete evidence."));
+                continue;
+            }
+
             if (record.Blocked)
             {
                 violations.Add(new GateViolation("blocked", $"{record.CaseId}: Tier 1 blocked the response"));
@@ -98,7 +132,8 @@ public static class Tier2Gate
             Run = run,
             Triad = triad,
             Violations = violations,
-            Warnings = warnings
+            Warnings = warnings,
+            TriadEvaluated = triadEvaluated
         };
     }
 

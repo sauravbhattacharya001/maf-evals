@@ -34,6 +34,13 @@ public sealed record EvalConfig
     [JsonPropertyName("baselineOverallPassRate")]
     public double? BaselineOverallPassRate { get; init; }
 
+    /// <summary>
+    /// Fraction of invocations allowed to fail for infrastructure reasons before the run is
+    /// declared untrustworthy. Defaults to zero: a partial run should not quietly become a verdict.
+    /// </summary>
+    [JsonPropertyName("maxErrorRate")]
+    public double MaxErrorRate { get; init; }
+
     [JsonPropertyName("maxMeanLatencyMs")]
     public double? MaxMeanLatencyMs { get; init; }
 }

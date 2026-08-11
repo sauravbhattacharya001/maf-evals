@@ -17,9 +17,12 @@ public sealed record GuardrailOutcome(
 /// The caller decides how to surface this; it must never be silently returned to a user.
 /// </summary>
 public sealed class GuardrailBlockedException(GuardrailOutcome outcome)
-    : Exception(BuildMessage(outcome))
+    : Exception(BuildMessage(outcome)), IRuleBlockedException
 {
     public GuardrailOutcome Outcome { get; } = outcome;
+
+    /// <inheritdoc />
+    public RuleReport Report => Outcome.FinalReport;
 
     private static string BuildMessage(GuardrailOutcome outcome)
     {

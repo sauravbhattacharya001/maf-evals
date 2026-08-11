@@ -26,7 +26,8 @@ public static class RunAnalyzer
             .GroupBy(record => record.CaseId, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
-                ResponseRecord[] records = group.ToArray();
+                // Errored invocations are excluded: they say nothing about the agent.
+                ResponseRecord[] records = group.Where(record => record.Counts).ToArray();
                 int trials = records.Length;
                 int passes = records.Count(record => record.Rules.Passed && !record.Blocked);
                 ConfidenceInterval interval = Wilson.Interval(passes, trials);
@@ -48,7 +49,7 @@ public static class RunAnalyzer
                     LowerBound = interval.Lower,
                     UpperBound = interval.Upper,
                     Flaky = passes > 0 && passes < trials,
-                    MeanLatencyMs = records.Average(record => record.LatencyMs),
+                    MeanLatencyMs = records.Length == 0 ? 0d : records.Average(record => record.LatencyMs),
                     TopFailures = topFailures
                 };
             })
@@ -59,6 +60,20 @@ public static class RunAnalyzer
     public static GateReport ApplyGates(RunArtifact artifact, EvalConfig config)
     {
         List<GateViolation> violations = [];
+
+        // An errored run is missing data. Reporting a pass rate over the survivors would state a
+        // reliability figure with unknown, silently omitted evidence behind it.
+        double errorRate = artifact.Responses.Count == 0
+            ? 0d
+            : (double)artifact.ErroredCount / artifact.Responses.Count;
+
+        if (errorRate > config.MaxErrorRate)
+        {
+            violations.Add(new GateViolation(
+                "infrastructure",
+                $"{artifact.ErroredCount} of {artifact.Responses.Count} invocation(s) errored " +
+                $"({errorRate:P0}), above the tolerated {config.MaxErrorRate:P0}. Results are not trustworthy."));
+        }
 
         if (artifact.OverallLowerBound < config.MinOverallPassRate)
         {

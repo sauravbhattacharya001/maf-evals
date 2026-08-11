@@ -15,7 +15,7 @@ public static class MarkdownReport
         RunArtifact run = result.Run;
         StringBuilder builder = new();
 
-        builder.AppendLine($"# Tier 2 gate {(result.Passed ? "PASSED" : "FAILED")}");
+        builder.AppendLine($"# Tier 2 gate {result.Verdict}");
         builder.AppendLine();
         builder.AppendLine($"- Run: `{run.RunId}`");
         builder.AppendLine($"- Model: `{run.Model}`");
@@ -123,3 +123,4 @@ public static class MarkdownReport
         _ => "?"
     };
 }
+

@@ -27,8 +27,9 @@ try
         _ => Help()
     };
 }
-catch (InvalidOperationException error)
+catch (Exception error) when (error is InvalidOperationException or IOException or UnauthorizedAccessException)
 {
+    // A broken artifact or missing configuration is a diagnosable condition, not a stack trace.
     Console.Error.WriteLine($"error: {error.Message}");
     return 2;
 }
@@ -89,8 +90,9 @@ static async Task<int> Tier2Async(CommandLine cli)
         .RunAsync(cases, repetitions, tier: "tier2", RepoPaths.GoldenSet, progress);
 
     List<TriadResult> triad = [];
+    bool triadEvaluated = !cli.HasFlag("--no-triad");
 
-    if (!cli.HasFlag("--no-triad"))
+    if (triadEvaluated)
     {
         (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge();
         Console.WriteLine($"\nJudging with {judgeModel}");
@@ -103,7 +105,7 @@ static async Task<int> Tier2Async(CommandLine cli)
         }
     }
 
-    Tier2Result result = Tier2Gate.Apply(run, cases, triad, config.Triad);
+    Tier2Result result = Tier2Gate.Apply(run, cases, triad, config.Triad, triadEvaluated);
     string path = Save($"tier2-{run.RunId}.json", result);
 
     Console.WriteLine();
@@ -149,11 +151,18 @@ static int Report(CommandLine cli)
         ?? RepoPaths.LatestRun()
         ?? throw new InvalidOperationException("No run artifact found.");
 
-    using FileStream stream = File.OpenRead(path);
-    RunArtifact run = JsonSerializer.Deserialize<RunArtifact>(stream, JsonDefaults.Options)
-        ?? throw new InvalidOperationException($"{path} is not a valid run artifact.");
+    // A Tier 2 artifact already carries its own verdict. Re-judging it with Tier 3's statistical
+    // gates would report a single-pass gate as failing simply because one observation per case
+    // cannot support a confidence bound.
+    if (ArtifactReader.SchemaOf(path) == Tier2Result.CurrentSchemaVersion)
+    {
+        Console.WriteLine(MarkdownReport.ForTier2(ArtifactReader.ReadTier2(path)));
+        return 0;
+    }
 
+    RunArtifact run = ArtifactReader.ReadRun(path);
     Console.WriteLine(MarkdownReport.ForRun(run, RunAnalyzer.ApplyGates(run, LoadConfig())));
+
     return 0;
 }
 
@@ -256,4 +265,6 @@ static int Help()
 
     return 0;
 }
+
+
 
