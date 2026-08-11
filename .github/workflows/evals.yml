@@ -1,0 +1,58 @@
+name: evals
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: Repetitions per golden case for Tier 2
+        default: "5"
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  # Tier 1 runs on every change. It needs no credentials, so it can never be skipped.
+  tier1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet test ThreeTierEvals.sln
+      - run: dotnet run --project src/EvalRunner -- tier1
+
+  # Tiers 2 and 3 cost money and call a model, so they are manual or scheduled.
+  tier2-tier3:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    environment: evals
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Tier 2 golden set
+        env:
+          EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+        run: >
+          dotnet run --project src/EvalRunner -- tier2
+          --repetitions ${{ github.event.inputs.repetitions || '5' }}
+
+      - name: Tier 3 judgement
+        env:
+          EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
+          JUDGE_MODEL: ${{ vars.JUDGE_MODEL }}
+        run: dotnet run --project src/EvalRunner -- tier3
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: artifacts/runs/

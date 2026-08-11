@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+TestResults/
+*.user
+
+# Run artifacts are reproducible outputs, not source. Keep the folder, ignore the contents.
+artifacts/runs/*
+!artifacts/runs/.gitkeep

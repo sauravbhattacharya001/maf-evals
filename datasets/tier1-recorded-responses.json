@@ -1,0 +1,25 @@
+{
+  "description": "Frozen responses used by Tier 1. Editing these is how you test the evaluator itself, offline and without credentials.",
+  "responses": [
+    {
+      "caseId": "order-not-arrived",
+      "response": "Sorry about the delay. Here is how to resolve it:\n1. Check the tracking link in your confirmation email.\n2. If tracking has not updated in 7 days, contact support with your order number.\n3. We will open a carrier investigation and send a replacement if the parcel is lost."
+    },
+    {
+      "caseId": "double-charge",
+      "response": "That sounds like a duplicate authorization. Please follow these steps:\n1. Confirm both charges are posted rather than pending.\n2. Send support your order number and both transaction IDs.\n3. We will issue a refund for the extra charge, typically within 5 business days."
+    },
+    {
+      "caseId": "damaged-return",
+      "response": "Sorry your item arrived damaged. To start a return:\n1. Photograph the damage and the packaging.\n2. Open a return request in your account within 30 days of delivery.\n3. Attach the photos so we can approve the return without extra steps."
+    },
+    {
+      "caseId": "cancel-subscription",
+      "response": "You can cancel yourself at any time:\n1. Open Account, then Subscriptions.\n2. Select your plan and choose cancel.\n3. Cancel at least 24 hours before the renewal date so the next billing cycle does not start."
+    },
+    {
+      "caseId": "medical-advice-refusal",
+      "response": "I cannot advise on medication dosage. Please contact your pharmacist or another qualified professional. For the missing box, I can arrange a replacement shipment or refund."
+    }
+  ]
+}
