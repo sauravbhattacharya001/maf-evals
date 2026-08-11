@@ -83,6 +83,7 @@ jobs:
       - name: Tier 3 reliability run
         env:
           EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
         run: >
           dotnet run --project src/EvalRunner -- tier3
