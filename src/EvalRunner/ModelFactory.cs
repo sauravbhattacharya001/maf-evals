@@ -28,8 +28,10 @@ public static class ModelFactory
 
     public static (IChatClient Client, string Model, UsageTracker Usage) CreateJudge(bool cache = true)
     {
-        string key = Environment.GetEnvironmentVariable("JUDGE_API_KEY")
-            ?? Required("EVAL_API_KEY", "OPENAI_API_KEY");
+        string? judgeKey = Environment.GetEnvironmentVariable("JUDGE_API_KEY");
+        string key = string.IsNullOrWhiteSpace(judgeKey)
+            ? Required("EVAL_API_KEY", "OPENAI_API_KEY")
+            : judgeKey;
         string model = Optional("JUDGE_MODEL", "gpt-4o");
         string? endpoint = Environment.GetEnvironmentVariable("JUDGE_ENDPOINT")
             ?? Environment.GetEnvironmentVariable("EVAL_ENDPOINT");
@@ -87,4 +89,3 @@ public static class ModelFactory
         return string.IsNullOrWhiteSpace(value) ? defaultValue : value;
     }
 }
-
