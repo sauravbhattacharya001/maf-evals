@@ -8,12 +8,14 @@ public sealed class ModelFactoryTests
     public void BlankModelVariablesUseDefaults()
     {
         string? originalKey = Environment.GetEnvironmentVariable("EVAL_API_KEY");
+        string? originalJudgeKey = Environment.GetEnvironmentVariable("JUDGE_API_KEY");
         string? originalCandidate = Environment.GetEnvironmentVariable("EVAL_MODEL");
         string? originalJudge = Environment.GetEnvironmentVariable("JUDGE_MODEL");
 
         try
         {
             Environment.SetEnvironmentVariable("EVAL_API_KEY", "test-key");
+            Environment.SetEnvironmentVariable("JUDGE_API_KEY", string.Empty);
             Environment.SetEnvironmentVariable("EVAL_MODEL", string.Empty);
             Environment.SetEnvironmentVariable("JUDGE_MODEL", " ");
 
@@ -26,6 +28,7 @@ public sealed class ModelFactoryTests
         finally
         {
             Environment.SetEnvironmentVariable("EVAL_API_KEY", originalKey);
+            Environment.SetEnvironmentVariable("JUDGE_API_KEY", originalJudgeKey);
             Environment.SetEnvironmentVariable("EVAL_MODEL", originalCandidate);
             Environment.SetEnvironmentVariable("JUDGE_MODEL", originalJudge);
         }
