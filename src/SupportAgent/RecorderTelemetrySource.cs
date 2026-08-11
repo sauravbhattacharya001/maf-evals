@@ -1,8 +1,7 @@
 using EvalFramework.Execution;
 using EvalFramework.Retrieval;
-using SupportAgent;
 
-namespace EvalRunner;
+namespace SupportAgent;
 
 /// <summary>
 /// Bridges the agent's guardrail telemetry to the eval runner without the framework taking a
@@ -21,3 +20,4 @@ public sealed class RecorderTelemetrySource(GuardrailRecorder recorder) : IRunTe
         return new RunTelemetry(retrieval, attempts, rejected);
     }
 }
+

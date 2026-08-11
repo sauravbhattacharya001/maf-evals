@@ -230,6 +230,12 @@ failing gate defeats the purpose.
 ## Limitations
 
 - Tier 2 and scheduled Tier 3 need credentials and are not covered by the offline suite.
+- **Wilson coverage dips near the boundary.** Simulation over 2000 samples measured 91.4% coverage
+  at a true rate of 0.98 with n=25, against a nominal 95%. Coverage oscillates with the discreteness
+  of the binomial and is weakest as the rate approaches 1, which is exactly where a healthy agent
+  sits. The Tier 3 lower-bound gate is therefore slightly anti-conservative in its most common
+  operating region. Raising repetitions is the mitigation; the effect is pinned by
+  `WilsonCoverageTests`.
 - Threshold bands are conventional starting values, not calibrated against human labels.
 - The retriever is TF-IDF, chosen for reproducibility; a production system would swap in embeddings
   behind the same `IRetriever` interface.
