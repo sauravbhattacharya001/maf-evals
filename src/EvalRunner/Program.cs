@@ -1,6 +1,7 @@
 using System.Text.Json;
 using EvalFramework;
 using EvalFramework.Calibration;
+using EvalFramework.Cost;
 using EvalFramework.Datasets;
 using EvalFramework.Execution;
 using EvalFramework.Incident;
@@ -83,20 +84,22 @@ static async Task<int> Tier2Async(CommandLine cli)
     EvalConfig config = LoadConfig();
     int repetitions = cli.IntOption("--repetitions") ?? config.Tier2Repetitions;
 
-    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent(repetitions);
+    (AIAgent agent, IRunTelemetrySource telemetry, string model, UsageTracker usage) = BuildAgent(repetitions);
 
     Console.WriteLine($"Tier 2: {cases.Count} cases x {repetitions} on {model}\n");
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
 
-    RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds))
+    RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds), usage, config.Pricing)
         .RunAsync(cases, repetitions, tier: "tier2", RepoPaths.GoldenSet, progress);
 
     List<TriadResult> triad = [];
     bool triadEvaluated = !cli.HasFlag("--no-triad");
+    UsageTracker? judgeTracker = null;
 
     if (triadEvaluated)
     {
-        (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge();
+        (IChatClient judgeClient, string judgeModel, UsageTracker judgeUsage) = ModelFactory.CreateJudge();
+        judgeTracker = judgeUsage;
         Console.WriteLine($"\nJudging with {judgeModel}");
 
         TriadEvaluator evaluator = new(
@@ -106,7 +109,10 @@ static async Task<int> Tier2Async(CommandLine cli)
         triad.AddRange(await evaluator.EvaluateManyAsync(judgeable, config.JudgeConcurrency, progress));
     }
 
-    Tier2Result result = Tier2Gate.Apply(run, cases, triad, config.Triad, triadEvaluated);
+    Tier2Result result = Tier2Gate.Apply(
+        run, cases, triad, config.Triad, triadEvaluated,
+        triadEvaluated ? judgeTracker?.Snapshot(config.Pricing) : null,
+        config.MaxRunCostUsd);
     string path = Save($"tier2-{run.RunId}.json", result);
 
     Console.WriteLine();
@@ -128,12 +134,12 @@ static async Task<int> Tier3Async(CommandLine cli)
     EvalConfig config = LoadConfig();
     int repetitions = cli.IntOption("--repetitions") ?? config.Tier3Repetitions;
 
-    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent(repetitions);
+    (AIAgent agent, IRunTelemetrySource telemetry, string model, UsageTracker usage) = BuildAgent(repetitions);
 
     Console.WriteLine($"Tier 3: {cases.Count} cases x {repetitions} on {model}\n");
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
 
-    RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds))
+    RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds), usage, config.Pricing)
         .RunAsync(cases, repetitions, tier: "tier3", RepoPaths.GoldenSet, progress);
 
     GateReport gates = RunAnalyzer.ApplyGates(run, config);
@@ -181,7 +187,7 @@ static async Task<int> ReplayIncidentAsync(CommandLine cli, string incidentPath)
 
     if (cli.HasFlag("--judge"))
     {
-        (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge();
+        (IChatClient judgeClient, string judgeModel, UsageTracker judgeUsage) = ModelFactory.CreateJudge();
         Console.WriteLine($"Judging incident with {judgeModel}\n");
 
         RuleReport rules = ResponseRules.Evaluate(
@@ -237,7 +243,7 @@ static async Task<int> CalibrateAsync(CommandLine cli)
     int repetitions = cli.IntOption("--repeat") ?? 1;
 
     // Repeated judging must bypass the cache, or every repetition replays one stored answer.
-    (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge(cache: repetitions == 1);
+    (IChatClient judgeClient, string judgeModel, UsageTracker judgeUsage) = ModelFactory.CreateJudge(cache: repetitions == 1);
     Console.WriteLine($"Calibrating {judgeModel} against {cases.Count} labelled cases\n");
 
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
@@ -295,16 +301,16 @@ static async Task<int> CalibrateAsync(CommandLine cli)
     return 0;
 }
 
-static (AIAgent Agent, IRunTelemetrySource Telemetry, string Model) BuildAgent(int repetitions = 1)
+static (AIAgent Agent, IRunTelemetrySource Telemetry, string Model, UsageTracker Usage) BuildAgent(int repetitions = 1)
 {
     // Repeated runs must bypass the cache, or every repetition replays one stored answer and the
     // reliability figures describe the cache rather than the agent.
-    (IChatClient client, string model) = ModelFactory.CreateCandidate(
+    (IChatClient client, string model, UsageTracker usage) = ModelFactory.CreateCandidate(
         EvalPolicy.ShouldCacheCandidate(repetitions));
     KeywordRetriever retriever = KeywordRetriever.FromDirectory(RepoPaths.Corpus);
     (AIAgent agent, GuardrailRecorder recorder) = SupportAgentFactory.Create(client, retriever);
 
-    return (agent, new RecorderTelemetrySource(recorder), model);
+    return (agent, new RecorderTelemetrySource(recorder), model, usage);
 }
 
 static string Save<T>(string fileName, T payload)
@@ -343,6 +349,7 @@ static int Help()
 
     return 0;
 }
+
 
 
 

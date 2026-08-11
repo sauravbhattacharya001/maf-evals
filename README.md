@@ -106,7 +106,7 @@ offline. The outcomes are:
 ## Quick start
 
 ```powershell
-dotnet test                                     # 181 offline tests
+dotnet test                                     # 194 offline tests
 dotnet run --project src/EvalRunner -- rules    # rule engine over frozen responses
 dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
 ```
@@ -205,6 +205,7 @@ softened.
 The judge is configured separately on purpose. Grading a model with itself correlates exactly the
 failure modes you most want to detect. Both clients are wrapped in a file-backed response cache
 under `artifacts/cache`, so re-running an unchanged prompt costs nothing even in a fresh CI process.
+Measured: a full Tier 2 run costs under `artifacts/cache`, so re-running an unchanged prompt costs nothing even in a fresh CI process..0996 cold and under `artifacts/cache`, so re-running an unchanged prompt costs nothing even in a fresh CI process..0000 warm.
 
 ## CI strategy
 
@@ -322,6 +323,34 @@ safely and returns results in input order for stable artifacts.
 Agent and judge calls both have a timeout (`callTimeoutSeconds`, default 120). A timed-out call is
 recorded as `Errored`, never as an agent failure.
 
+## Cost
+
+Every run records billed calls, tokens, and estimated cost for the candidate and the judge
+separately. Usage tracking sits **below** the response cache, so a cache hit costs nothing and is
+never reported as spend; without that ordering the saving caching provides could not be verified.
+
+Measured on the 5-case golden set:
+
+| | Cold cache | Warm cache |
+| --- | --- | --- |
+| Candidate (`gpt-4o-mini`) | 5 calls, 1,797 tokens, $0.0004 | 0 calls, $0.0000 |
+| Judge (`gpt-4o`) | 15 calls, 32,087 tokens, $0.0992 | 0 calls, $0.0000 |
+| **Total** | **$0.0996** | **$0.0000** |
+
+The judge costs roughly **250 times** the agent: 18 times the tokens on a model priced an order of
+magnitude higher. The system under test is nearly free, and measuring it is the entire bill. Three
+consequences follow.
+
+- Caching is not a convenience, it is what makes a per-pull-request judge viable.
+- Judge sampling matters far more than candidate sampling. Tier 3 repeats the *agent* cheaply; it
+  does not repeat the judge.
+- Roughly a third of judge spend goes on retrieval scoring, which is advisory and flips 17% of
+  verdicts. Dropping it is a defensible saving, kept for now because it is still informative when
+  read as a trend rather than a gate.
+
+`maxRunCostUsd` gates the total. An unpriced model yields no cost rather than zero, and the budget
+gate reports that it could not be enforced instead of silently passing.
+
 ## Limitations
 
 - Tier 2 and scheduled Tier 3 need credentials and are not covered by the offline suite.
@@ -345,6 +374,7 @@ recorded as `Errored`, never as an agent failure.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+
 
 
 

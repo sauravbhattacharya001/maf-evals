@@ -1,4 +1,5 @@
 using System.Text;
+using EvalFramework.Cost;
 using EvalFramework.Execution;
 using EvalFramework.RagTriad;
 using EvalFramework.Statistics;
@@ -40,6 +41,15 @@ public static class MarkdownReport
             builder.AppendLine("Metrics marked advisory are reported but never block; see judge calibration.");
             builder.AppendLine();
         }
+
+        builder.AppendLine(CostLine("Candidate", run.Usage));
+        builder.AppendLine(CostLine("Judge", result.JudgeUsage));
+
+        double? total = ModelPricing.Total(run.Usage, result.JudgeUsage);
+        builder.AppendLine(total is double spent
+            ? $"- Total estimated cost: **${spent:F4}**"
+            : "- Total estimated cost: unknown (a model has no configured price)");
+        builder.AppendLine();
 
         int retried = run.Responses.Count(record => record.Attempts > 1);
         int rejected = run.Responses.Sum(record => record.RejectedToolCalls.Count);
@@ -109,6 +119,18 @@ public static class MarkdownReport
         return builder.ToString();
     }
 
+    private static string CostLine(string label, CostSummary? usage)
+    {
+        if (usage is null)
+        {
+            return $"- {label}: not run";
+        }
+
+        string cost = usage.EstimatedCostUsd is double value ? $"${value:F4}" : "unpriced";
+
+        return $"- {label}: {usage.BilledCalls} billed call(s), {usage.TotalTokens:N0} tokens, {cost}";
+    }
+
     private static string Cell(TriadResult triad, string metric, TriadThresholds thresholds)
     {
         TriadScore? score = triad.Scores.FirstOrDefault(item => item.Metric == metric);
@@ -131,4 +153,5 @@ public static class MarkdownReport
         _ => "?"
     };
 }
+
 

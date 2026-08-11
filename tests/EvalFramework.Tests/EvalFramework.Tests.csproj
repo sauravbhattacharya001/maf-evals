@@ -6,6 +6,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
@@ -14,4 +15,5 @@
     <ProjectReference Include="..\..\src\SupportAgent\SupportAgent.csproj" />
   </ItemGroup>
 </Project>
+
 

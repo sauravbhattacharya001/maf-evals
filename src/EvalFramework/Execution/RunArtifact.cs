@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using EvalFramework.Cost;
 using EvalFramework.Retrieval;
 using EvalFramework.Rules;
 
@@ -148,10 +149,15 @@ public sealed record RunArtifact
     [JsonPropertyName("meanLatencyMs")]
     public required double MeanLatencyMs { get; init; }
 
+    /// <summary>Candidate model spend. Null when nothing was executed.</summary>
+    [JsonPropertyName("usage")]
+    public CostSummary? Usage { get; init; }
+
     [JsonPropertyName("cases")]
     public required IReadOnlyList<CaseStatistics> Cases { get; init; }
 
     [JsonPropertyName("responses")]
     public required IReadOnlyList<ResponseRecord> Responses { get; init; }
 }
+
 

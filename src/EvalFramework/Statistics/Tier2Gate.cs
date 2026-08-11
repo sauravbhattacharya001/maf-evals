@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using EvalFramework.Cost;
 using EvalFramework.Datasets;
 using EvalFramework.Execution;
 using EvalFramework.RagTriad;
@@ -35,6 +36,10 @@ public sealed record Tier2Result
     [JsonPropertyName("triadEvaluated")]
     public required bool TriadEvaluated { get; init; }
 
+    /// <summary>Judge model spend, tracked separately because it is billed separately.</summary>
+    [JsonPropertyName("judgeUsage")]
+    public CostSummary? JudgeUsage { get; init; }
+
     /// <summary>Thresholds in force for this run, so a report can say what was advisory.</summary>
     [JsonPropertyName("thresholds")]
     public TriadThresholds Thresholds { get; init; } = new();
@@ -67,7 +72,9 @@ public static class Tier2Gate
         IReadOnlyList<GoldenCase> cases,
         IReadOnlyList<TriadResult> triad,
         TriadThresholds thresholds,
-        bool triadEvaluated = true)
+        bool triadEvaluated = true,
+        CostSummary? judgeUsage = null,
+        double? maxRunCostUsd = null)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(cases);
@@ -141,6 +148,24 @@ public static class Tier2Gate
             }
         }
 
+        double? totalCost = ModelPricing.Total(run.Usage, judgeUsage);
+
+        if (maxRunCostUsd is double budget)
+        {
+            if (totalCost is double spent && spent > budget)
+            {
+                violations.Add(new GateViolation(
+                    "budget",
+                    $"run cost ${spent:F4} exceeds budget ${budget:F4}"));
+            }
+            else if (totalCost is null)
+            {
+                // A budget cannot be enforced against an unpriced model, and silently passing
+                // would make the gate look stricter than it is.
+                warnings.Add("budget not enforced: no price configured for one or more models");
+            }
+        }
+
         return new Tier2Result
         {
             Run = run,
@@ -148,6 +173,7 @@ public static class Tier2Gate
             Violations = violations,
             Warnings = warnings,
             TriadEvaluated = triadEvaluated,
+            JudgeUsage = judgeUsage,
             Thresholds = thresholds
         };
     }
@@ -178,4 +204,5 @@ public static class Tier2Gate
         }
     }
 }
+
 

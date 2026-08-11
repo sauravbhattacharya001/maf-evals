@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using EvalFramework.Cost;
 using EvalFramework.Datasets;
 using EvalFramework.Retrieval;
 using EvalFramework.Rules;
@@ -46,7 +47,9 @@ public sealed class AgentRunner(
     AIAgent agent,
     string model,
     IRunTelemetrySource? telemetry = null,
-    TimeSpan? perRunTimeout = null)
+    TimeSpan? perRunTimeout = null,
+    UsageTracker? usage = null,
+    ModelPricing? pricing = null)
 {
     public async Task<RunArtifact> RunAsync(
         IReadOnlyList<GoldenCase> cases,
@@ -75,7 +78,7 @@ public sealed class AgentRunner(
             }
         }
 
-        return Build(cases, responses, repetitions, tier, model, datasetPath);
+        return Build(cases, responses, repetitions, tier, model, datasetPath, usage?.Snapshot(pricing));
     }
 
     private async Task<ResponseRecord> RunOnceAsync(
@@ -170,7 +173,8 @@ public sealed class AgentRunner(
         int repetitions,
         string tier,
         string model,
-        string datasetPath)
+        string datasetPath,
+        CostSummary? usage = null)
     {
         // Errored runs are missing data: they are excluded from the denominator rather than
         // counted as failures, and surfaced separately so a silent outage cannot be mistaken
@@ -192,8 +196,10 @@ public sealed class AgentRunner(
             OverallLowerBound = overall.Lower,
             OverallUpperBound = overall.Upper,
             MeanLatencyMs = counted.Length == 0 ? 0d : counted.Average(record => record.LatencyMs),
+            Usage = usage,
             Cases = RunAnalyzer.Summarize(cases, responses),
             Responses = responses
         };
     }
 }
+

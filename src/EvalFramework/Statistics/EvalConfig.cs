@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using EvalFramework.Cost;
 using EvalFramework.RagTriad;
 
 namespace EvalFramework.Statistics;
@@ -41,6 +42,14 @@ public sealed record EvalConfig
     [JsonPropertyName("maxErrorRate")]
     public double MaxErrorRate { get; init; }
 
+    /// <summary>Prices per million tokens. An unpriced model reports no cost rather than zero.</summary>
+    [JsonPropertyName("pricing")]
+    public ModelPricing Pricing { get; init; } = new();
+
+    /// <summary>Budget for one run. Null disables the budget gate.</summary>
+    [JsonPropertyName("maxRunCostUsd")]
+    public double? MaxRunCostUsd { get; init; }
+
     /// <summary>Seconds before a single agent or judge call is abandoned as errored.</summary>
     [JsonPropertyName("callTimeoutSeconds")]
     public int CallTimeoutSeconds { get; init; } = 120;
@@ -52,4 +61,5 @@ public sealed record EvalConfig
     [JsonPropertyName("maxMeanLatencyMs")]
     public double? MaxMeanLatencyMs { get; init; }
 }
+
 

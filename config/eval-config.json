@@ -11,10 +11,18 @@
   "minStandardCasePassRate": 0.60,
   "maxRegression": 0.05,
   "baselineOverallPassRate": 1.0,
+  "pricing": {
+    "rates": {
+      "gpt-4o-mini": { "inputPerMillion": 0.15, "outputPerMillion": 0.60 },
+      "gpt-4o": { "inputPerMillion": 2.50, "outputPerMillion": 10.00 }
+    }
+  },
+  "maxRunCostUsd": 1.0,
   "callTimeoutSeconds": 120,
   "judgeConcurrency": 4,
   "maxMeanLatencyMs": null
 }
+
 
 
 
