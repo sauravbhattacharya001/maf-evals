@@ -42,6 +42,12 @@ public sealed record EvalConfig
     [JsonPropertyName("maxErrorRate")]
     public double MaxErrorRate { get; init; }
 
+    /// <summary>
+    /// Trajectories judged per case in a scheduled Tier 3 run. Zero disables trajectory judging.
+    /// </summary>
+    [JsonPropertyName("trajectorySamplesPerCase")]
+    public int TrajectorySamplesPerCase { get; init; } = 1;
+
     /// <summary>Prices per million tokens. An unpriced model reports no cost rather than zero.</summary>
     [JsonPropertyName("pricing")]
     public ModelPricing Pricing { get; init; } = new();
@@ -61,5 +67,6 @@ public sealed record EvalConfig
     [JsonPropertyName("maxMeanLatencyMs")]
     public double? MaxMeanLatencyMs { get; init; }
 }
+
 
 

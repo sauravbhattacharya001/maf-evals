@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using EvalFramework.Cost;
 using EvalFramework.Retrieval;
 using EvalFramework.Rules;
+using EvalFramework.Trajectory;
 
 namespace EvalFramework.Execution;
 
@@ -48,6 +49,10 @@ public sealed record ResponseRecord
     /// <summary>Tier 1 attempts spent on this response. Greater than one means a guard fired.</summary>
     [JsonPropertyName("attempts")]
     public int Attempts { get; init; } = 1;
+
+    /// <summary>Every turn, tool call and tool result. The evidence trajectory judging needs.</summary>
+    [JsonPropertyName("trajectory")]
+    public IReadOnlyList<TrajectoryMessage> Trajectory { get; init; } = [];
 
     /// <summary>Every tool the agent invoked, including calls a guard refused.</summary>
     [JsonPropertyName("toolCalls")]
@@ -160,9 +165,18 @@ public sealed record RunArtifact
     [JsonPropertyName("cases")]
     public required IReadOnlyList<CaseStatistics> Cases { get; init; }
 
+    /// <summary>Trajectory judgements, when the run sampled them. A trend, never a gate.</summary>
+    [JsonPropertyName("trajectory")]
+    public IReadOnlyList<TrajectoryResult> TrajectoryResults { get; init; } = [];
+
+    [JsonPropertyName("trajectorySummary")]
+    public IReadOnlyList<TrajectoryMetricSummary> TrajectorySummary { get; init; } = [];
+
     [JsonPropertyName("responses")]
     public required IReadOnlyList<ResponseRecord> Responses { get; init; }
 }
+
+
 
 
 

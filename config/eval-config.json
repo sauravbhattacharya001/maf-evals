@@ -11,6 +11,7 @@
   "minStandardCasePassRate": 0.60,
   "maxRegression": 0.05,
   "baselineOverallPassRate": 1.0,
+  "trajectorySamplesPerCase": 1,
   "pricing": {
     "rates": {
       "gpt-4o-mini": { "inputPerMillion": 0.15, "outputPerMillion": 0.60 },
@@ -22,6 +23,7 @@
   "judgeConcurrency": 4,
   "maxMeanLatencyMs": null
 }
+
 
 
 

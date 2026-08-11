@@ -14,9 +14,9 @@ answer different questions.
 | | Tier 1 | Tier 2 | Tier 3 |
 | --- | --- | --- | --- |
 | Runs | inside the agent, every request | CI, every pull request | scheduled, or after an incident |
-| Asks | can this response go out? | may this change merge? | how reliable is it, and what went wrong? |
-| Checks | tool arguments, then final response | rules, retrieval, tool calls, RAG triad | repetition, confidence intervals, replay |
-| Model calls | none of its own | candidate and judge, cached | candidate only, uncached |
+| Asks | can this response go out? | may this change merge? | did it reason well, and is that drifting? |
+| Checks | tool arguments, then final response | rules, retrieval, tool calls, RAG triad | trajectory quality, reliability, replay |
+| Model calls | none of its own | candidate and judge, cached | candidate uncached, judge sampled |
 | On failure | retry, then per-rule severity | block the merge | report and explain |
 
 ## Principles
@@ -59,7 +59,7 @@ dotnet run --project src/EvalRunner -- calibrate --repeat 3
 | --- | --- |
 | `rules` | Offline: rules accept the known-good responses |
 | `tier2 [--repetitions N] [--no-triad]` | Pull-request gate |
-| `tier3 [--repetitions N]` | Scheduled reliability run |
+| `tier3 [--repetitions N] [--trajectory-samples N]` | Scheduled: judged reasoning trajectory plus reliability |
 | `tier3 --incident PATH [--judge]` | Replay a captured production trace |
 | `safety [--repetitions N]` | Adversarial suite: injection, jailbreak, extraction |
 | `calibrate [--repeat N] [--case ID]` | Score the judge against human labels and against itself |
@@ -134,7 +134,39 @@ A judge is stochastic, so a single cut-off turns a borderline score into a coin 
 a floor that blocks and a target that warns. Deterministic checks have no band; they always block,
 because they cannot flake.
 
-## Tier 3: reliability and forensics
+## Tier 3: reasoning quality, reliability, and forensics
+
+Tier 2 asks whether the final answer was good. Tier 3 asks whether the agent **reasoned** well, which
+the answer alone cannot show: an agent that guesses correctly without checking, calls a tool it did
+not need, or ignores what a tool returned produces text indistinguishable from one that worked
+properly. Judging the path requires recording the path, so every run stores the full trajectory of
+turns, tool calls and tool results.
+
+| Metric | Scale | Question |
+| --- | --- | --- |
+| Intent Resolution | 1-5 | did it work out what the customer actually wanted? |
+| Task Adherence | 1-5 | did it follow its instructions and use what it was given? |
+| Tool Call Accuracy | 0-1 | were the calls it made relevant and correctly parameterised? |
+
+Reported as a distribution, never as a gate. Measured judge instability reaches a three point swing
+on identical input, so a single score cannot decide anything; a mean and spread across many judged
+trajectories survives that noise. The scales differ deliberately and are labelled, because reading a
+0.75 pass rate as a poor 1-5 rating would be an easy and expensive mistake.
+
+A measured run, 8 cases at 2 repetitions:
+
+| Metric | mean | sd | min | weak cases |
+| --- | --- | --- | --- | --- |
+| Intent Resolution | 4.38 | 0.70 | 3.0 | refund-over-limit |
+| Task Adherence | 3.38 | 0.99 | 2.0 | 4 of 8 cases |
+| Tool Call Accuracy | 1.00 | 0.00 | 1.0 | none |
+
+Task Adherence found a systemic weakness no pass or fail check could see: across half the golden set
+the agent was docked for describing what it would do rather than calling the tools it had been given.
+The same weakness surfaced separately as a flaky case, where the agent called the tool on one run and
+narrated on the next.
+
+### Reliability
 
 **Scheduled**: many repetitions, Wilson 95% intervals, per-case flakiness, drift against a baseline.
 With 5 passes out of 5 the naive interval reads 100% to 100%; Wilson reads roughly 57% to 100%,
@@ -336,6 +368,9 @@ Every entry below was found by the evaluation, not by review.
 | Prompt injection through the corpus succeeded | The tool guard stopped the side effect anyway |
 | Hardening against injection suppressed tool use | Two evals in tension, both necessary |
 | A rule demanded `escalate`, agent said `escalation` | A fragile word list punishes correct behaviour |
+| The agent offered to split a 4000 refund into 500 chunks | A rule checking wording cannot see a control being structured around |
+| Tool call accuracy silently scored null | It returns a boolean metric, not numeric; the judge worked, my unwrapping did not |
+| Task adherence flagged 4 of 8 cases | The agent narrates tool use instead of calling tools, invisible to pass or fail |
 
 ## Limitations
 
@@ -357,5 +392,8 @@ Every entry below was found by the evaluation, not by review.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+
+
+
 
 

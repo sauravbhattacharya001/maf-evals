@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>EvalFramework</RootNamespace>
+    <!-- Intent resolution, task adherence and tool call accuracy are experimental in the quality
+         library. Used for scheduled trend reporting only, never to gate a merge. -->
+    <NoWarn>$(NoWarn);AIEVAL001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Agents.AI" />
@@ -10,4 +13,5 @@
     <InternalsVisibleTo Include="EvalFramework.Tests" />
   </ItemGroup>
 </Project>
+
 

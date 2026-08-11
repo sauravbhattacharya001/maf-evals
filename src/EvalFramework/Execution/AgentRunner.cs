@@ -93,6 +93,7 @@ public sealed class AgentRunner(
         string text;
         ResponseOutcome outcome = ResponseOutcome.Completed;
         string? error = null;
+        IReadOnlyList<TrajectoryMessage> trajectory = [];
 
         try
         {
@@ -112,6 +113,7 @@ public sealed class AgentRunner(
                 .ConfigureAwait(false);
 
             text = response.Text ?? string.Empty;
+            trajectory = Trajectory.Capture(response.Messages);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -159,6 +161,7 @@ public sealed class AgentRunner(
             LatencyMs = latencyMs,
             Rules = rules,
             Retrieval = captured.Retrieval,
+            Trajectory = trajectory,
             Attempts = captured.Attempts,
             ToolCalls = captured.ToolCalls,
             RejectedToolCalls = captured.ToolCalls.Where(call => call.Rejected).Select(call => call.Name).ToArray(),
@@ -203,5 +206,6 @@ public sealed class AgentRunner(
         };
     }
 }
+
 
 

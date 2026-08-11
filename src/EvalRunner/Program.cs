@@ -9,6 +9,7 @@ using EvalFramework.RagTriad;
 using EvalFramework.Reporting;
 using EvalFramework.Rules;
 using EvalFramework.Statistics;
+using EvalFramework.Trajectory;
 using EvalRunner;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -225,6 +226,50 @@ static async Task<int> Tier3Async(CommandLine cli)
     RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds), usage, config.Pricing)
         .RunAsync(cases, repetitions, tier: "tier3", RepoPaths.GoldenSet, progress);
 
+    // Trajectory judging: did the agent reason soundly, not merely answer consistently. Sampled,
+    // reported as a distribution, and never allowed to fail the run: a scheduled tier exists to
+    // reveal drift, and a stochastic judge cannot be a gate.
+    int samples = cli.IntOption("--trajectory-samples") ?? config.TrajectorySamplesPerCase;
+
+    if (samples > 0 && !cli.HasFlag("--no-trajectory"))
+    {
+        (IChatClient judgeClient, string judgeModel, UsageTracker judgeUsage) =
+            ModelFactory.CreateJudge(cache: false);
+
+        ResponseRecord[] sampled = run.Responses
+            .Where(record => record.Counts && !record.Blocked)
+            .GroupBy(record => record.CaseId, StringComparer.OrdinalIgnoreCase)
+            .SelectMany(group => group.OrderBy(record => record.Repetition).Take(samples))
+            .ToArray();
+
+        Console.WriteLine($"\nJudging {sampled.Length} trajectories with {judgeModel}");
+
+        IReadOnlyList<TrajectoryResult> judged = await new TrajectoryEvaluator(
+                judgeClient, SupportPolicy.CreateTools(), TimeSpan.FromSeconds(config.CallTimeoutSeconds))
+            .EvaluateManyAsync(sampled, config.JudgeConcurrency, progress);
+
+        run = run with
+        {
+            TrajectoryResults = judged,
+            TrajectorySummary = TrajectorySummary.Summarize(judged)
+        };
+
+        Console.WriteLine();
+        Console.WriteLine("| Trajectory metric | scale | judged | mean | sd | min | weak cases |");
+        Console.WriteLine("| --- | --- | --- | --- | --- | --- | --- |");
+
+        foreach (TrajectoryMetricSummary summary in run.TrajectorySummary)
+        {
+            string weak = summary.WorstCases.Count == 0 ? "-" : string.Join(", ", summary.WorstCases);
+            Console.WriteLine(
+                $"| {summary.Metric} | {summary.Scale} | {summary.Judged} | {summary.Mean:F2} " +
+                $"| {summary.StandardDeviation:F2} | {summary.Min:F1} | {weak} |");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"judge spend: {judgeUsage.Snapshot(config.Pricing).EstimatedCostUsd:C4}");
+    }
+
     GateReport gates = RunAnalyzer.ApplyGates(run, config);
     string path = Save($"tier3-{run.RunId}.json", run);
 
@@ -422,7 +467,8 @@ static int Help()
           tier2 [--repetitions N]        Pull-request gate: rules, retrieval, and the RAG triad
                 [--no-triad]             Skip judge calls and gate on deterministic checks only
           safety [--repetitions N]       Adversarial suite: injection, jailbreak, extraction
-          tier3 [--repetitions N]        Scheduled reliability run with confidence intervals
+          tier3 [--repetitions N]        Scheduled run: reliability, plus judged reasoning trajectory
+                [--trajectory-samples N] [--no-trajectory]
           tier3 --incident PATH [--judge] Replay a captured production trace against today's rules
           report [--run PATH]            Print the report for a saved run artifact
           calibrate [--repeat N] [--case ID] Score the judge against the human-labelled set;
@@ -433,6 +479,8 @@ static int Help()
 
     return 0;
 }
+
+
 
 
 
