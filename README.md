@@ -3,8 +3,10 @@
 A reference implementation of agent evaluation, built on Microsoft Agent Framework (.NET 8).
 
 The subject under test is a small customer-support agent with retrieval and two tools. It is
-deliberately modest: the agent exists to exercise the evaluation, not the other way round. What is
-worth copying here is the evaluation strategy and the discipline behind it.
+deliberately modest: the agent exists to exercise the evaluation, not the other way round. The
+evaluation strategy, and the discipline behind it, are what this repository is for.
+
+Every finding quoted below was produced by running the thing, not by reasoning about it.
 
 ## The three tiers
 
@@ -15,16 +17,20 @@ answer different questions.
 | --- | --- | --- | --- |
 | Runs | inside the agent, every request | CI, every pull request | scheduled, occasional |
 | Asks | can this response go out? | may this change merge? | did it reason its way there? |
-| Checks | tool arguments, then final response | rules, retrieval, tool calls, semantics, RAG triad | intent, task adherence, tool choice |
+| Checks | tool arguments, then final response | rules, retrieval, tool calls, meaning, RAG triad | intent, task adherence, tool choice |
 | Model calls | none of its own | candidate, judge, embeddings | judge only |
 | On failure | retry, then per-rule severity | block the merge | report a trend, never block |
 
+Three things sit outside the tiers because they are not part of the merge path: an adversarial safety
+suite, judge calibration, and incident replay.
+
 ## Principles
 
-1. **A rule beats a judge** wherever the property can be expressed as a rule. Judges are for
-   relevance and groundedness, not for formatting, required disclosures, or tool choice.
-2. **Never pay twice for a response.** The triad scores responses Tier 2 already generated.
-3. **A judge reports, a rule gates.** Measured judge instability makes a stochastic score unfit to block a merge.
+1. **A rule beats a judge** wherever a property can be stated as a rule. Judges are for meaning, not
+   for formatting, tool choice, or required disclosures.
+2. **A judge reports, a rule gates.** Measured instability makes a stochastic score unfit to block a
+   merge.
+3. **Never buy the same response twice.** Every judge reads responses an earlier run recorded.
 4. **Measure the judge before trusting it.** Thresholds set without calibration are taste.
 5. **Missing data is not a failure.** An API error must never be counted as an agent regression.
 6. **A suite that cannot fail is not a suite.** Every rule is paired with output it must reject.
@@ -32,13 +38,13 @@ answer different questions.
 ## Quick start
 
 ```powershell
-dotnet test                                                   # 240 offline tests
-dotnet run --project src/EvalRunner -- rules                  # rules accept correct output
+dotnet test                                                          # 288 offline tests
+dotnet run --project src/EvalRunner -- rules                         # rules accept correct output
 dotnet run --project src/EvalRunner -- incident --trace incidents/sample-incident.json
 ```
 
-All three run with no credentials. Model-backed commands need a key in a gitignored `.env.local`,
-copied from `.env.example`:
+Those need no credentials. Model-backed commands read a gitignored `.env.local`, copied from
+`.env.example`:
 
 ```
 EVAL_API_KEY=sk-...
@@ -47,9 +53,9 @@ JUDGE_MODEL=gpt-4o
 ```
 
 ```powershell
-dotnet run --project src/EvalRunner -- tier2       # the pull-request gate
-dotnet run --project src/EvalRunner -- safety      # adversarial suite
-dotnet run --project src/EvalRunner -- tier3
+dotnet run --project src/EvalRunner -- tier2        # the pull-request gate
+dotnet run --project src/EvalRunner -- tier3        # judge the reasoning trajectory
+dotnet run --project src/EvalRunner -- safety       # adversarial suite
 dotnet run --project src/EvalRunner -- calibrate --repeat 3
 ```
 
@@ -57,25 +63,26 @@ dotnet run --project src/EvalRunner -- calibrate --repeat 3
 
 | Command | Purpose |
 | --- | --- |
-| `rules` | Offline: rules accept the known-good responses |
-| `tier2 [--repetitions N] [--no-triad]` | Pull-request gate |
+| `rules` | Offline: the rules accept every known-good response |
+| `tier2 [--no-triad]` | Pull-request gate |
 | `tier3 [--run PATH]` | Model as judge over the reasoning trajectory |
+| `safety` | Adversarial suite: injection, jailbreak, extraction |
+| `calibrate [--repeat N] [--case ID]` | Judge against human labels, and against itself |
 | `incident --trace PATH [--judge]` | Replay one captured production trace |
-| `safety [--repetitions N]` | Adversarial suite: injection, jailbreak, extraction |
-| `calibrate [--repeat N] [--case ID]` | Score the judge against human labels and against itself |
 | `retrieve --query "..." [--top N]` | Inspect retrieval offline while authoring a case |
 | `report [--run PATH]` | Print a saved artifact |
 
 Exit codes: `0` pass, `1` gate failure, `2` configuration error.
 
-## Tier 1: hot-path guardrails
+## Tier 1: guardrails in the hot path
 
-Two layers, both inside the ReAct loop.
+Tier 1 is code that ships with the agent, not a test. It runs on live traffic and its job is to stop
+a bad response or a bad action before anyone sees it.
 
 **Layer A validates tool arguments before the tool runs.** On violation it does not call the tool; it
-returns an explanation as the tool result, which the model reads on its next iteration and corrects
-from. This costs nothing extra, because the loop was already going to iterate, and it prevents side
-effects a later retry could not undo.
+returns an explanation as the tool result, which the model reads on its next loop iteration and
+corrects from. That costs nothing extra, because the loop was going to iterate anyway, and it
+prevents side effects no later retry could undo.
 
 **Layer B validates the final response and retries with corrective feedback**, naming the rules that
 failed.
@@ -84,9 +91,9 @@ Severity decides what happens when retries run out:
 
 | Severity | Behaviour |
 | --- | --- |
-| `Warn` | record it, let the response through, do not spend a retry |
+| `Warn` | record it, let it through, do not spend a retry |
 | `Retry` | retry, then degrade to a warning |
-| `Block` | retry, then throw; the response must never reach a user |
+| `Block` | retry, then throw; it must never reach a user |
 
 ```csharp
 new AIAgentBuilder(inner)
@@ -99,6 +106,15 @@ new AIAgentBuilder(inner)
 Retrieval sits outside the retry loop deliberately. Inside it, every retry would re-retrieve and the
 captured trace would no longer describe the context that produced the final answer.
 
+### Some rules need the conversation
+
+Argument validation alone is blind to structuring. Asked for a 4000 refund against a 500 limit, the
+agent called `issue_refund` with 500, and the guard allowed it: 500 is a perfectly valid amount.
+Every call was individually in policy while the sequence was not.
+
+Tool rules therefore receive the messages leading up to the call, so a payout can be refused on the
+basis of what was asked for rather than what was passed.
+
 Only Tier 1 honours severity. Tier 2 gates on every rule, because a warn-level rule failing across
 the whole golden set is still a regression.
 
@@ -109,7 +125,8 @@ One pass per case, in increasing order of cost:
 1. **Rules** — the same engine Tier 1 uses, so a rule cannot drift between production and CI.
 2. **Retrieval expectations** — did the expected corpus chunks come back? Exact, free, no judge.
 3. **Tool calls** — did the agent reach for the right tool, with the right values?
-4. **RAG triad** — retrieval, groundedness, and answer relevance, scored by a judge.
+4. **Semantic expectations** — is the meaning right, where wording is free to vary?
+5. **RAG triad** — retrieval, groundedness, answer relevance, scored by a judge.
 
 Each triad metric isolates a distinct failure: retrieval catches a bad knowledge base or query,
 groundedness catches invention beyond the context, relevance catches well-grounded answers that miss
@@ -122,24 +139,42 @@ the question. A single quality score would blur all three.
 "forbiddenToolCalls": ["issue_refund"]
 ```
 
-Arguments match as a subset, so extra arguments are harmless while the named ones must be right. A
-call a guard rejected neither satisfies an expectation nor violates a prohibition, which keeps
-"escalated correctly" distinct from "tried and was stopped". `ToolCallAccuracyEvaluator` exists in
-the quality library and is deliberately unused: paying a stochastic judge to confirm a recorded fact
-is worse on both cost and reliability.
+Arguments match as a subset, so extras are harmless while the named ones must be right. A call a
+guard rejected neither satisfies an expectation nor violates a prohibition, which keeps "escalated
+correctly" distinct from "tried and was stopped". `ToolCallAccuracyEvaluator` exists in the quality
+library and is not used here: paying a stochastic judge to confirm a recorded fact is worse on both
+cost and reliability.
+
+### Meaning is checked by embeddings, not by a word list
+
+A keyword list is a bad proxy for meaning. Asked to decline an over-limit refund, the agent said
+"without escalation", then "up to 500 units", then "without additional approval". Each fix added the
+missing synonym and the next run found another, while the behaviour was correct every time.
+
+```json
+"semanticExpectations": [{
+  "name": "declines_and_explains_limit",
+  "anyOf": ["I cannot approve a refund of that size myself, it needs a supervisor."],
+  "minSimilarity": 0.55
+}]
+```
+
+Embeddings rather than a judge, deliberately: deterministic for a fixed model, roughly a thousand
+times cheaper, and they compare meaning without inventing an opinion. This runs in Tier 2 only, since
+Tier 1 must stay free of network calls.
 
 ### Threshold bands
 
 A judge is stochastic, so a single cut-off turns a borderline score into a coin flip. Each metric has
-a floor that blocks and a target that warns. Deterministic checks have no band; they always block,
+a floor that blocks and a target that warns. Deterministic checks have no band: they always block,
 because they cannot flake.
 
 ## Tier 3: model as judge over the trajectory
 
-Tier 3 does one thing: it judges how the agent reasoned. Not whether the answer was acceptable, which
-Tier 2 already gates, but whether the path to it was sound. An agent that guesses correctly without
-checking, calls a tool it did not need, or ignores what a tool returned produces text
-indistinguishable from one that worked properly. Judging the path requires recording the path, so
+Tier 3 does exactly one thing: it judges how the agent reasoned. Not whether the answer was
+acceptable, which Tier 2 already gates, but whether the path there was sound. An agent that guesses
+correctly without checking, calls a tool it did not need, or ignores what a tool returned produces
+text indistinguishable from one that worked properly. Judging the path requires recording it, so
 every run stores the full trajectory of turns, tool calls and tool results.
 
 | Metric | Scale | Question |
@@ -154,13 +189,9 @@ dotnet run --project src/EvalRunner -- tier3 --run PATH   # judge trajectories a
 ```
 
 `--run` reuses a saved artifact, so a trajectory recorded by Tier 2 can be judged without paying for
-the agent a second time. The same rule the triad follows: never buy the same response twice.
+the agent again.
 
-**It reports, it does not gate.** The judge was measured flipping verdicts on identical input, so a
-score here is evidence for a human to read, never a merge decision. The scales differ deliberately
-and are labelled, because reading a 0.75 pass rate as a poor 1-5 rating would be an easy mistake.
-
-A measured run over 8 cases:
+**It reports, it never gates.** A measured run over 8 cases:
 
 | Metric | mean | sd | min | weak cases |
 | --- | --- | --- | --- | --- |
@@ -169,26 +200,16 @@ A measured run over 8 cases:
 | Tool Call Accuracy | 1.00 | 0.00 | 1.0 | none |
 
 Task Adherence found a systemic weakness no pass or fail check could see: repeatedly, the agent was
-docked for describing what it would do rather than calling the tools it had been given.
+docked for describing what it would do rather than calling the tools it had been given. The scales
+differ and are labelled, because reading a 0.75 pass rate as a poor 1-5 rating would be an easy and
+expensive mistake.
 
-## Incident replay
-
-Not a tier. A diagnostic against one captured production trace, run when something has gone wrong:
-
-```powershell
-dotnet run --project src/EvalRunner -- incident --trace incidents/sample-incident.json
-```
-
-Fully offline unless `--judge` is passed. Two useful outcomes: today''s rules catch it, meaning the
-guard now covers what production missed; or nothing catches it, meaning a golden case is needed or a
-recurrence will slip through too.
 ## Judge calibration
 
-Thresholds are meaningful only if the judge's 3 means what a reviewer's 3 means.
-`datasets/judge-calibration.jsonl` holds 12 hand-labelled cases built so the metrics diverge, with
-the labelling criteria in `rubrics/calibration-labelling-guide.md`. Two questions get asked, in
-order: does the judge agree with itself, and does it agree with a human? The second is meaningless
-without the first.
+Thresholds only mean something if the judge's 3 means what a reviewer's 3 means. Twelve hand-labelled
+cases live in `datasets/judge-calibration.jsonl`, built so the metrics diverge, with the criteria in
+`rubrics/calibration-labelling-guide.md`. Two questions, in order: does the judge agree with itself,
+and does it agree with a human? The second is meaningless without the first.
 
 ### Self-consistency, 12 cases judged 3 times
 
@@ -199,9 +220,9 @@ without the first.
 | Relevance | 0.00 | 0.0 | 0% |
 
 Retrieval scored one identical input `5, 2, 4, 5, 2`. A mean standard deviation of 0.20 looks
-reassuring and is misleading: most cases are stable while two swing three points, so 17% of cases
-would flip a merge decision at random. **Retrieval is therefore advisory, not blocking**; retrieval
-quality is gated by `expectedChunkIds` instead, which is exact and free.
+reassuring and misleads: most cases are stable while two swing three points, so 17% of cases would
+flip a merge decision at random. **Retrieval is therefore advisory**, and retrieval quality is gated
+by `expectedChunkIds` instead, which is exact and free.
 
 ### Agreement with human labels
 
@@ -215,7 +236,7 @@ Groundedness fails in two opposite directions at once. It scores outright fabric
 every time, and penalises grounded answers for being off topic. Because the errors cancel, **bias
 reads a healthy −0.17 while the metric is unreliable**; mean absolute error and band agreement tell
 the truth. The floor was raised from 3.0 to 3.5 as a direct consequence, since at 3.0 every
-hallucination passed as a warning. That single change lifted band agreement from 50% to 75%.
+hallucination passed as a warning. That one change lifted band agreement from 50% to 75%.
 
 Re-run calibration after changing the judge model, the labelling guide, or any threshold. Numbers
 from different judges are not comparable.
@@ -244,11 +265,18 @@ argument here for validating tool arguments inside the loop: no post-hoc eval ca
 
 Foundry-backed safety evaluators (`Microsoft.Extensions.AI.Evaluation.Safety`) are deliberately not
 wired. They need Azure AI Foundry credentials this environment lacks, and shipping unverified code
-would contradict the point of the repository. They are the natural next step on Azure.
+would contradict the point of the repository.
+
+## Incident replay
+
+Not a tier. A diagnostic against one captured production trace, run when something has gone wrong,
+and fully offline unless `--judge` is passed. Two useful outcomes: today's rules catch it, so the
+guard now covers what production missed; or nothing catches it, so a golden case is needed before a
+recurrence slips through too.
 
 ## Cost
 
-Every run records billed calls, tokens, and estimated cost for candidate and judge separately. Usage
+Every run records billed calls, tokens and estimated cost for candidate and judge separately. Usage
 tracking sits **below** the response cache, so a cache hit costs nothing and is never reported as
 spend; without that ordering the caching claim could not be verified.
 
@@ -258,10 +286,11 @@ spend; without that ordering the caching claim could not be verified.
 | Judge (`gpt-4o`) | 15 calls, 32,087 tokens, $0.0992 | 0 calls, $0.0000 |
 
 The judge costs roughly **250 times** the agent. The system under test is nearly free; measuring it
-is the entire bill. Caching is therefore a requirement rather than an optimisation, judge sampling
-matters far more than candidate sampling, and about a third of judge spend goes to a retrieval metric
-that is advisory. `maxRunCostUsd` gates the total; an unpriced model reports no cost rather than
-zero, and the budget gate says it could not be enforced instead of silently passing.
+is the entire bill. Caching is a requirement rather than an optimisation, and judge sampling matters
+far more than candidate sampling. A full Tier 2 run is about $0.16, a Tier 3 run about $0.10.
+
+`maxRunCostUsd` gates the total. An unpriced model reports no cost rather than zero, and the budget
+gate says it could not be enforced instead of silently passing.
 
 ## How the framework checks itself
 
@@ -272,27 +301,32 @@ An eval framework that cannot fail is indistinguishable from one that always ret
 | Positive and negative fixtures | Rules that accept everything, or reject everything |
 | Seeded defects | An unwired pipeline that unit tests cannot detect |
 | Retrieval regressions | Paying a judge to discover what the free suite could catch |
-| Wilson coverage simulation | Trusting a transcribed formula rather than its claim |
 | Golden-set health | Duplicates, unexercised corpus, cases with no content rule |
 | Schema fixtures | Artifacts becoming unreadable while still claiming a version |
 | Judge calibration | Thresholds set by taste |
 
-Mutation check: forcing every rule to pass breaks 31 tests. Coverage is 85.9% line, 73.5% branch,
-collected on every pull request.
+**Mutation check:** forcing every rule to pass breaks 45 of the 288 tests.
+
+**Coverage** is 85.1% on the eval framework and 96.6% on the agent. The CLI sits at 8.4%: it is thin
+wiring, exercised by the live commands rather than by unit tests, which pulls the overall figure to
+72.6%. Reporting the aggregate alone would flatter the untested part and understate the tested one.
 
 ## Layout
 
 ```text
 src/SupportAgent/          the agent under test: guardrails, retrieval, policy
-src/EvalFramework/         rules, triad, statistics, cost, calibration, incident replay
+src/EvalFramework/         rules, triad, trajectory, calibration, cost, incident replay
 src/EvalRunner/            CLI
 corpus/                    knowledge base
 corpus-adversarial/        poisoned knowledge base, safety suite only
 datasets/                  golden set, adversarial set, fixtures, calibration labels
 incidents/                 captured production traces
 testdata/schemas/          artifact fixtures enforcing schema compatibility
-config/eval-config.json    repetitions, thresholds, pricing, budgets
+config/eval-config.json    thresholds, pricing, budgets, timeouts
 ```
+
+Datasets: 8 golden cases, 6 adversarial cases, 12 calibration labels, 8 positive and 12 negative
+fixtures, across 5 corpus documents.
 
 ## Golden case schema
 
@@ -302,48 +336,58 @@ config/eval-config.json    repetitions, thresholds, pricing, budgets
   "query": "Order A-31905 arrived damaged. Please refund me 120 for it.",
   "critical": true,
   "expectedTerms": ["A-31905"],
-  "expectedAnyTerms": [["supervisor", "escalat", "cannot"]],
+  "expectedAnyTerms": [["refund", "credit"]],
   "forbiddenTerms": ["I can't help"],
   "minLength": 40,
   "requireActionableFormat": false,
   "expectedChunkIds": ["refunds#3"],
   "expectedToolCalls": [{ "name": "issue_refund", "arguments": { "amount": 120 } }],
   "forbiddenToolCalls": ["issue_refund"],
-  "severities": { "expected_any_terms": "Block" }
+  "semanticExpectations": [{ "name": "declines", "anyOf": ["..."], "minSimilarity": 0.55 }],
+  "severities": { "expected_terms": "Block" }
 }
 ```
 
-`expectedTerms` requires every term; `expectedAnyTerms` requires one from each group, which is what
-you need when several words satisfy the same policy. Terms are matched as substrings, so a stem such
-as `escalat` covers every inflection. Rules live with the case, so extending coverage is a data
-change.
+`expectedTerms` requires every term; `expectedAnyTerms` requires one from each group. Terms match as
+substrings, so a stem such as `escalat` covers every inflection. Where wording varies more than that,
+use `semanticExpectations`. Rules live with the case, so extending coverage is a data change.
+
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `EVAL_API_KEY` / `OPENAI_API_KEY` | Candidate agent credential |
+| `EVAL_MODEL` | Candidate model, default `gpt-4o-mini` |
+| `JUDGE_API_KEY`, `JUDGE_MODEL` | Judge, default `gpt-4o` |
+| `EMBEDDING_MODEL` | Semantic rules, default `text-embedding-3-small` |
+| `EVAL_ENDPOINT`, `JUDGE_ENDPOINT` | Optional OpenAI-compatible base URLs |
+
+Blank counts as absent everywhere. GitHub Actions injects an undefined secret as an empty string, so
+`??` silently keeps the empty value: that cost three CI failures before it was fixed in one place.
 
 ## CI
 
 Offline tests, the rule check, and incident replay run on every pull request with no secrets.
 
 Tier 2 needs credentials to generate responses at all, so **fork pull requests cannot run it**. They
-receive an explicit skipped status rather than a misleading green, and a maintainer runs it from a
-branch in the repository before merging. Tier 3 runs on a schedule.
+get an explicit skipped status rather than a misleading green, and a maintainer runs it from a branch
+in the repository before merging. Tier 3 and the safety suite run on a schedule.
 
 ## Extending
 
 **Add a case:** append to the JSONL file, add a positive fixture and at least one negative fixture,
-then run `rules`. The health tests fail if a case has no fixture, no content rule, duplicates another
+then run `rules`. Health tests fail if a case has no fixture, no content rule, duplicates another
 query, or leaves a corpus document unexercised.
 
 **Add a rule:** add it to `ResponseRules` or `ToolArgumentRules`, give it a default severity, and add
 a negative fixture proving it fires. Both tiers pick it up automatically.
 
-**After an incident:** capture a trace into `incidents/`, run replay, and add a golden case if the
-report says no rule explains it.
-
-**Update the baseline:** only after an intentional, green Tier 3 run. Raising a baseline to silence a
-failing gate defeats the purpose.
+**After an incident:** capture a trace into `incidents/`, run replay, and add a golden case if no
+rule explains it.
 
 ## What went wrong, and what it taught
 
-Every entry below was found by the evaluation, not by review.
+Every entry was found by the evaluation, not by review. Six were defects in the evaluation itself.
 
 | Finding | Lesson |
 | --- | --- |
@@ -351,44 +395,33 @@ Every entry below was found by the evaluation, not by review.
 | Rules had no negative fixtures | A green suite proved nothing until sabotage broke it |
 | The retrieval judge scored `5, 2, 4, 5, 2` on one input | Average stability hid a 17% verdict flip rate |
 | Groundedness scored fabrication at exactly 3.0 | A floor of 3.0 let every hallucination through |
-| The cache made Tier 3 repetitions identical | Caching and reliability measurement are incompatible |
-| Tools were registered as `LookupOrder`, rules guarded `lookup_order` | The guard was inert in every real run |
+| The cache made repeated runs identical | Caching and reliability measurement are incompatible |
+| Tools registered as `LookupOrder`, rules guarded `lookup_order` | The guard was inert in every real run |
 | Telemetry handed out its live list | A later reset erased evidence already captured |
 | The tokeniser had no stemming | `refund` never matched `refunds`, hiding a policy |
 | Prompt injection through the corpus succeeded | The tool guard stopped the side effect anyway |
 | Hardening against injection suppressed tool use | Two evals in tension, both necessary |
-| A rule demanded `escalate`, agent said `escalation` | A fragile word list punishes correct behaviour |
-| The same list then failed on "additional approval" | Patching synonyms three times means the rule tests phrasing, not meaning |
-| The agent paid out 500 against a 4000 request | Per-call validation is blind to structuring; the guard needed the conversation |
-| The agent offered to split a 4000 refund into 500 chunks | A rule checking wording cannot see a control being structured around |
-| Tool call accuracy silently scored null | It returns a boolean metric, not numeric; the judge worked, my unwrapping did not |
-| Task adherence flagged 4 of 8 cases | The agent narrates tool use instead of calling tools, invisible to pass or fail |
+| A word list failed three times on correct refusals | Patching synonyms means the rule tests phrasing, not meaning |
+| The agent paid out 500 against a 4000 request | Per-call validation is blind to structuring |
+| Tool call accuracy silently scored null | It returns a boolean metric; the judge worked, the unwrapping did not |
+| Task adherence flagged half the golden set | The agent narrates tool use instead of calling tools |
+| A concurrency test compared wall-clock times | The suite made itself flaky, the thing it warns against |
 
 ## Limitations
 
-- Tier 2, Tier 3 and safety need credentials and are not covered by the offline suite.
+- Tier 2, Tier 3 and the safety suite need credentials and are not covered by the offline suite.
 - Groundedness agrees with human labels 75% of the time at band level, relevance 83%. Both gate
   today; treat their scores as coarse signals.
 - The calibration set is 12 cases labelled by one person: enough to expose systematic judge
   behaviour, not to tune thresholds finely.
-- Wilson coverage dips near the boundary. Simulation measured 91.4% coverage at a true rate of 0.98
-  with n=25 against a nominal 95%, so the Tier 3 lower-bound gate is slightly anti-conservative
-  exactly where a healthy agent sits. More repetitions is the mitigation.
+- Semantic thresholds are set by inspection rather than calibrated against a labelled corpus.
 - Retrieval is TF-IDF, chosen for reproducibility. Two golden cases rank a weaker chunk first because
   a keyword's sense depends on context; this is where embeddings would earn their cost.
+- The CLI is barely unit-tested, covered only by running it.
 - Every case is single-turn. Multi-turn evaluation, and the session behaviour of Tier 1 retries, are
-  not yet covered.
+  not covered.
 
 ## References
 
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
-- [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
-
-
-
-
-
-
-
-
