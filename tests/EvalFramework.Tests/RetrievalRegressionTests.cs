@@ -59,6 +59,30 @@ public sealed class RetrievalRegressionTests
             missing.Length == 0,
             $"{caseId}: expected {string.Join(", ", missing)} but retrieved {string.Join(", ", retrieved)}.");
     }
+    [Fact]
+    public void WeakChunksAreDroppedRatherThanPaddingTheContext()
+    {
+        // Calibration showed the judge scores retrieval on precision. The medical case previously
+        // returned safety#2 (1.88), safety#3 (0.52) and safety#1 (0.45); the tail is noise.
+        RetrievalTrace trace = Retriever()
+            .Retrieve("My package contained medication. Should I double my dose since one box was missing?");
+
+        Assert.NotEmpty(trace.Chunks);
+        Assert.All(trace.Chunks, chunk => Assert.True(chunk.Score >= trace.Chunks[0].Score * 0.4));
+    }
+
+    [Fact]
+    public void CutoffNeverDiscardsTheBestChunk()
+    {
+        KeywordRetriever retriever = Retriever();
+
+        foreach (GoldenCase item in Cases())
+        {
+            RetrievalTrace trace = retriever.Retrieve(item.Query);
+            Assert.NotEmpty(trace.Chunks);
+        }
+    }
+
 
     [Fact]
     public void EveryGoldenCaseDeclaresARetrievalExpectation()
@@ -111,3 +135,4 @@ public sealed class RetrievalRegressionTests
             $"Only {topRanked}/{cases.Length} cases rank an expected chunk first.");
     }
 }
+

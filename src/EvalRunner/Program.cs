@@ -1,5 +1,6 @@
 using System.Text.Json;
 using EvalFramework;
+using EvalFramework.Calibration;
 using EvalFramework.Datasets;
 using EvalFramework.Execution;
 using EvalFramework.Incident;
@@ -24,6 +25,7 @@ try
         "tier2" => await Tier2Async(cli),
         "tier3" => await Tier3Async(cli),
         "report" => Report(cli),
+        "calibrate" => await CalibrateAsync(cli),
         _ => Help()
     };
 }
@@ -222,6 +224,78 @@ static async Task<int> ReplayIncidentAsync(CommandLine cli, string incidentPath)
     return 0;
 }
 
+// Checks the judge against human labels. Without this, thresholds are taste, not measurement.
+static async Task<int> CalibrateAsync(CommandLine cli)
+{
+        IReadOnlyList<CalibrationCase> cases = CalibrationSet.Load(RepoPaths.Calibration);
+    EvalConfig config = LoadConfig();
+
+    if (cli.Option("--case") is string only)
+    {
+        cases = cases.Where(item => item.Id.Equals(only, StringComparison.OrdinalIgnoreCase)).ToArray();
+    }
+
+    int repetitions = cli.IntOption("--repeat") ?? 1;
+
+    // Repeated judging must bypass the cache, or every repetition replays one stored answer.
+    (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge(cache: repetitions == 1);
+    Console.WriteLine($"Calibrating {judgeModel} against {cases.Count} labelled cases\n");
+
+    Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
+
+    CalibrationReport report = await new CalibrationRunner(
+            new TriadEvaluator(judgeClient, config.Triad), judgeModel)
+        .RunAsync(cases, config.Triad, repetitions, progress);
+
+    string path = Save($"calibration-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.json", report);
+
+    Console.WriteLine();
+    Console.WriteLine("| Metric | n | exact | within 1 | MAE | bias | corr | band |");
+    Console.WriteLine("| --- | --- | --- | --- | --- | --- | --- | --- |");
+
+    foreach (MetricAgreement agreement in report.Agreement)
+    {
+        Console.WriteLine(
+            $"| {agreement.Metric} | {agreement.Compared} | {agreement.ExactAgreement:P0} " +
+            $"| {agreement.WithinOne:P0} | {agreement.MeanAbsoluteError:F2} | {agreement.Bias:+0.00;-0.00;0.00} " +
+            $"| {agreement.Correlation:F2} | {agreement.BandAgreement:P0} |");
+    }
+
+    foreach (ConsistencySummary summary in report.Consistency)
+    {
+        Console.WriteLine(
+            $"consistency {summary.Metric}: mean sd {summary.MeanStandardDeviation:F2}, " +
+            $"worst range {summary.WorstRange:F1}, verdict flip rate {summary.VerdictFlipRate:P0}");
+
+        foreach (CaseConsistency flipped in summary.Cases.Where(c => c.VerdictFlipped))
+        {
+            Console.WriteLine($"    FLIPS {flipped.CaseId}: {string.Join(", ", flipped.Scores)}");
+        }
+    }
+
+    string[] blocking = report.Agreement
+        .SelectMany(agreement => agreement.Disagreements.Select(d => $"{agreement.Metric}: {d}"))
+        .ToArray();
+
+    if (blocking.Length > 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("## Gate-changing disagreements");
+        Console.WriteLine("One side would block the merge and the other would not:");
+
+        foreach (string disagreement in blocking)
+        {
+            Console.WriteLine($"- {disagreement}");
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"artifact: {path}");
+
+    // Calibration is a measurement, not a gate: it tells you whether to trust the thresholds.
+    return 0;
+}
+
 static (AIAgent Agent, IRunTelemetrySource Telemetry, string Model) BuildAgent()
 {
     (IChatClient client, string model) = ModelFactory.CreateCandidate();
@@ -259,12 +333,17 @@ static int Help()
           tier3 [--repetitions N]        Scheduled reliability run with confidence intervals
           tier3 --incident PATH [--judge] Replay a captured production trace against today's rules
           report [--run PATH]            Print the report for a saved run artifact
+          calibrate [--repeat N] [--case ID] Score the judge against the human-labelled set;
+                                         --repeat measures judge self-consistency
 
         Exit codes: 0 pass, 1 gate failure, 2 configuration error.
         """);
 
     return 0;
 }
+
+
+
 
 
 

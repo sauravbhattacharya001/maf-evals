@@ -31,10 +31,13 @@ public static class MarkdownReport
             foreach (TriadResult triad in result.Triad)
             {
                 builder.AppendLine(
-                    $"| {triad.CaseId} | {Cell(triad, TriadMetrics.Retrieval)} " +
-                    $"| {Cell(triad, TriadMetrics.Groundedness)} | {Cell(triad, TriadMetrics.Relevance)} |");
+                    $"| {triad.CaseId} | {Cell(triad, TriadMetrics.Retrieval, result.Thresholds)} " +
+                    $"| {Cell(triad, TriadMetrics.Groundedness, result.Thresholds)} " +
+                    $"| {Cell(triad, TriadMetrics.Relevance, result.Thresholds)} |");
             }
 
+            builder.AppendLine();
+            builder.AppendLine("Metrics marked advisory are reported but never block; see judge calibration.");
             builder.AppendLine();
         }
 
@@ -106,20 +109,25 @@ public static class MarkdownReport
         return builder.ToString();
     }
 
-    private static string Cell(TriadResult triad, string metric)
+    private static string Cell(TriadResult triad, string metric, TriadThresholds thresholds)
     {
         TriadScore? score = triad.Scores.FirstOrDefault(item => item.Metric == metric);
 
-        return score is null
-            ? "-"
-            : $"{score.Score?.ToString("F1") ?? "n/a"} {Marker(score.Verdict)}";
+        if (score is null)
+        {
+            return "-";
+        }
+
+        bool blocking = thresholds.For(metric).Blocking;
+
+        return $"{score.Score?.ToString("F1") ?? "n/a"} {Marker(score.Verdict, blocking)}";
     }
 
-    private static string Marker(TriadVerdict verdict) => verdict switch
+    private static string Marker(TriadVerdict verdict, bool blocking) => verdict switch
     {
         TriadVerdict.Pass => "ok",
         TriadVerdict.Warn => "warn",
-        TriadVerdict.Fail => "FAIL",
+        TriadVerdict.Fail => blocking ? "FAIL" : "low (advisory)",
         _ => "?"
     };
 }

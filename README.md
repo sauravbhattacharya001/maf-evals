@@ -120,6 +120,7 @@ dotnet run --project src/EvalRunner -- tier3 --repetitions 5
 | `tier3 [--repetitions N]` | Scheduled reliability run |
 | `tier3 --incident PATH [--judge]` | Replay a production trace |
 | `report [--run PATH]` | Print a saved run artifact |
+| `calibrate [--repeat N] [--case ID]` | Score the judge against human labels; `--repeat` measures self-consistency |
 
 Exit codes: `0` pass, `1` gate failure, `2` configuration error.
 
@@ -227,6 +228,60 @@ failing gate defeats the purpose.
 - Grading a model with itself.
 - Comparing scores across different judge models or threshold settings.
 
+## Judge calibration
+
+Thresholds are only meaningful if the judge's 3 means what a reviewer's 3 means. `datasets/judge-calibration.jsonl`
+holds 12 hand-labelled cases, deliberately built so the three metrics diverge, and
+`dotnet run --project src/EvalRunner -- calibrate` scores the judge against them.
+
+Two questions get asked, in order. Does the judge agree with a human, and does it agree with itself?
+The second must be answered first, because a metric that contradicts itself cannot agree with
+anything.
+
+### Self-consistency, 12 cases judged 3 times each
+
+| Metric | mean SD | worst range | verdict flip rate |
+| --- | --- | --- | --- |
+| Retrieval | 0.20 | 3.0 | **17%** |
+| Groundedness | 0.00 | 0.0 | 0% |
+| Relevance | 0.00 | 0.0 | 0% |
+
+Retrieval scored one identical input `5, 2, 4, 5, 2` across five runs. Mean standard deviation of
+0.20 looks reassuring, and is misleading: most cases are stable while two swing by three points, so
+17% of cases would flip a merge decision at random. The flip rate is the number that matters, not
+the average.
+
+**Retrieval is therefore advisory, not blocking.** Retrieval quality is gated by `expectedChunkIds`
+instead, which is exact, stable, and free. Groundedness and relevance were bit-for-bit reproducible,
+so thresholds on them are meaningful.
+
+### Agreement with human labels
+
+| Metric | exact | within 1 | MAE | bias | corr | band |
+| --- | --- | --- | --- | --- | --- | --- |
+| Retrieval | 75% | 92% | 0.42 | -0.42 | 0.88 | 83% |
+| Groundedness | 42% | 67% | 1.17 | -0.17 | 0.44 | 75% |
+| Relevance | 25% | 83% | 0.92 | -0.42 | 0.74 | 83% |
+
+Groundedness fails in two opposite directions at once:
+
+| Failure | Cases | Human | Judge |
+| --- | --- | --- | --- |
+| Fabrication or contradiction | cal-02, cal-06, cal-11 | 1, 1, 2 | **3.0 every time** |
+| Faithful but off-topic | cal-03, cal-12 | 5, 4 | **1, 2** |
+
+The judge never uses 1 or 2 for fabrication, and it penalises groundedness for irrelevance, blending
+the two metrics it exists to separate. Because the errors cancel, **bias reads a healthy −0.17 while
+the metric is unreliable**; mean absolute error and band agreement tell the truth. Correlation and
+bias alone are not sufficient evidence for a threshold.
+
+The floor was raised from 3.0 to 3.5 as a direct consequence: at 3.0 every hallucination case scored
+exactly 3.0 and passed as a warning, so the metric designed to catch invention never fired on it.
+That single change raised band agreement from 50% to 75%.
+
+Re-run calibration after changing the judge model, the rubric, or any threshold. Numbers from
+different judges are not comparable.
+
 ## Limitations
 
 - Tier 2 and scheduled Tier 3 need credentials and are not covered by the offline suite.
@@ -236,7 +291,10 @@ failing gate defeats the purpose.
   sits. The Tier 3 lower-bound gate is therefore slightly anti-conservative in its most common
   operating region. Raising repetitions is the mitigation; the effect is pinned by
   `WilsonCoverageTests`.
-- Threshold bands are conventional starting values, not calibrated against human labels.
+- Groundedness agrees with human labels only 75% of the time at band level, and relevance 83%. Both
+  are gates today; treat their scores as coarse signals rather than measurements.
+- The calibration set is 12 cases labelled by one person. It is enough to expose systematic judge
+  behaviour, not enough to tune thresholds finely.
 - The retriever is TF-IDF, chosen for reproducibility; a production system would swap in embeddings
   behind the same `IRetriever` interface.
 - With a session, a Tier 1 retry sends only the correction, so the failed attempt stays in
@@ -247,4 +305,6 @@ failing gate defeats the purpose.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+
+
 

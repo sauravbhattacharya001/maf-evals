@@ -35,6 +35,10 @@ public sealed record Tier2Result
     [JsonPropertyName("triadEvaluated")]
     public required bool TriadEvaluated { get; init; }
 
+    /// <summary>Thresholds in force for this run, so a report can say what was advisory.</summary>
+    [JsonPropertyName("thresholds")]
+    public TriadThresholds Thresholds { get; init; } = new();
+
     [JsonIgnore]
     public bool Passed => Violations.Count == 0;
 
@@ -105,19 +109,29 @@ public static class Tier2Gate
         {
             foreach (TriadScore score in result.Scores)
             {
+                ThresholdBand band = thresholds.For(score.Metric);
+
                 switch (score.Verdict)
                 {
+                    // An advisory metric is reported but never blocks, because it has been measured
+                    // to disagree with itself across repeated judging.
+                    case TriadVerdict.Fail when !band.Blocking:
+                        warnings.Add(
+                            $"{result.CaseId}: {score.Metric} scored {score.Score:F1}, " +
+                            $"below floor {band.Floor:F1} (advisory)");
+                        break;
+
                     case TriadVerdict.Fail:
                         violations.Add(new GateViolation(
                             "triad",
                             $"{result.CaseId}: {score.Metric} scored {score.Score:F1}, " +
-                            $"below floor {thresholds.For(score.Metric).Floor:F1}"));
+                            $"below floor {band.Floor:F1}"));
                         break;
 
                     case TriadVerdict.Warn:
                         warnings.Add(
                             $"{result.CaseId}: {score.Metric} scored {score.Score:F1}, " +
-                            $"below target {thresholds.For(score.Metric).Target:F1}");
+                            $"below target {band.Target:F1}");
                         break;
 
                     case TriadVerdict.NotScored:
@@ -133,7 +147,8 @@ public static class Tier2Gate
             Triad = triad,
             Violations = violations,
             Warnings = warnings,
-            TriadEvaluated = triadEvaluated
+            TriadEvaluated = triadEvaluated,
+            Thresholds = thresholds
         };
     }
 
@@ -163,3 +178,4 @@ public static class Tier2Gate
         }
     }
 }
+

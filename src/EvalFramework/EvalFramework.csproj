@@ -6,4 +6,8 @@
     <PackageReference Include="Microsoft.Agents.AI" />
     <PackageReference Include="Microsoft.Extensions.AI.Evaluation.Quality" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="EvalFramework.Tests" />
+  </ItemGroup>
 </Project>
+

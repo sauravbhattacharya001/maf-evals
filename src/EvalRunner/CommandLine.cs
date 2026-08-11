@@ -40,6 +40,8 @@ public static class RepoPaths
 
     public static string Corpus => Path.Combine(Root, "corpus");
 
+    public static string Calibration => Path.Combine(Root, "datasets", "judge-calibration.jsonl");
+
     public static string RunsDirectory => Path.Combine(Root, "artifacts", "runs");
 
     public static string CacheDirectory => Path.Combine(Root, "artifacts", "cache");
@@ -73,4 +75,5 @@ public static class RepoPaths
         return Directory.GetCurrentDirectory();
     }
 }
+
 

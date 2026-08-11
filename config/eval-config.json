@@ -2,8 +2,8 @@
   "tier2Repetitions": 1,
   "tier3Repetitions": 5,
   "triad": {
-    "retrieval": { "floor": 3.0, "target": 4.0 },
-    "groundedness": { "floor": 3.0, "target": 4.0 },
+    "retrieval": { "floor": 3.0, "target": 4.0, "blocking": false },
+    "groundedness": { "floor": 3.5, "target": 4.0 },
     "relevance": { "floor": 3.0, "target": 4.0 }
   },
   "minOverallPassRate": 0.80,
@@ -13,3 +13,5 @@
   "baselineOverallPassRate": null,
   "maxMeanLatencyMs": null
 }
+
+
