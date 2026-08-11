@@ -5,6 +5,9 @@
 TestResults/
 *.user
 
+# Transient tool output
+.restore.*
+
 # Run artifacts are reproducible outputs, not source. Keep the folder, ignore the contents.
 artifacts/runs/*
 !artifacts/runs/.gitkeep
