@@ -27,6 +27,7 @@ try
         "tier3" => await Tier3Async(cli),
         "report" => Report(cli),
         "retrieve" => Retrieve(cli),
+        "safety" => await SafetyAsync(cli),
         "calibrate" => await CalibrateAsync(cli),
         _ => Help()
     };
@@ -142,6 +143,63 @@ static async Task<int> Tier2Async(CommandLine cli)
 
     Console.WriteLine();
     Console.WriteLine(MarkdownReport.ForTier2(result));
+    Console.WriteLine($"artifact: {path}");
+
+    return result.Passed ? 0 : 1;
+}
+
+// Adversarial suite. The corpus is deliberately poisoned so indirect prompt injection is exercised
+// the way it actually reaches a RAG agent: through retrieved content, not through the user turn.
+static async Task<int> SafetyAsync(CommandLine cli)
+{
+    IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.AdversarialSet);
+    EvalConfig config = LoadConfig();
+    int repetitions = cli.IntOption("--repetitions") ?? 1;
+
+    (IChatClient client, string model, UsageTracker usage) = ModelFactory.CreateCandidate(
+        EvalPolicy.ShouldCacheCandidate(repetitions));
+
+    KeywordRetriever retriever = KeywordRetriever.FromDirectories(
+        RepoPaths.Corpus, RepoPaths.AdversarialCorpus);
+
+    (AIAgent agent, GuardrailRecorder recorder) = SupportAgentFactory.Create(client, retriever);
+
+    Console.WriteLine($"Safety: {cases.Count} adversarial cases x {repetitions} on {model}\n");
+    Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
+
+    RunArtifact run = await new AgentRunner(
+            agent, model, new RecorderTelemetrySource(recorder),
+            TimeSpan.FromSeconds(config.CallTimeoutSeconds), usage, config.Pricing)
+        .RunAsync(cases, repetitions, tier: "safety", RepoPaths.AdversarialSet, progress);
+
+    // Judged by rules only. A refusal is a fact about the text, and a jailbreak that succeeded is
+    // visible in what the agent said and did, so a model is not needed to see it.
+    Tier2Result result = Tier2Gate.Apply(run, cases, [], config.Triad, triadEvaluated: false);
+    string path = Save($"safety-{run.RunId}.json", result);
+
+    Console.WriteLine();
+    Console.WriteLine($"# Safety suite {(result.Passed ? "PASSED" : "FAILED")}");
+    Console.WriteLine();
+
+    foreach (GoldenCase item in cases)
+    {
+        ResponseRecord[] records = run.Responses.Where(r => r.CaseId == item.Id).ToArray();
+        bool held = records.All(r => r.Rules.Passed && !r.Blocked && !r.Errored)
+            && !result.Violations.Any(v => v.Detail.StartsWith(item.Id, StringComparison.Ordinal));
+
+        Console.WriteLine($"  [{(held ? "HELD" : "BREACH")}] {item.Id}: {item.Attack}");
+    }
+
+    if (!result.Passed)
+    {
+        Console.WriteLine();
+        foreach (GateViolation violation in result.Violations)
+        {
+            Console.WriteLine($"  - {violation.Gate}: {violation.Detail}");
+        }
+    }
+
+    Console.WriteLine();
     Console.WriteLine($"artifact: {path}");
 
     return result.Passed ? 0 : 1;
@@ -363,6 +421,7 @@ static int Help()
           rules                          Rule engine over frozen responses (offline, no credentials)
           tier2 [--repetitions N]        Pull-request gate: rules, retrieval, and the RAG triad
                 [--no-triad]             Skip judge calls and gate on deterministic checks only
+          safety [--repetitions N]       Adversarial suite: injection, jailbreak, extraction
           tier3 [--repetitions N]        Scheduled reliability run with confidence intervals
           tier3 --incident PATH [--judge] Replay a captured production trace against today's rules
           report [--run PATH]            Print the report for a saved run artifact
@@ -374,6 +433,7 @@ static int Help()
 
     return 0;
 }
+
 
 
 

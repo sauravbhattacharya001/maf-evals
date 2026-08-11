@@ -9,6 +9,10 @@ namespace SupportAgent.Retrieval;
 /// </summary>
 public static class CorpusLoader
 {
+        /// <summary>Loads several corpora as one, used to add an adversarial corpus to the real one.</summary>
+    public static IReadOnlyList<CorpusChunk> Load(IEnumerable<string> directories) =>
+        directories.SelectMany(Load).ToArray();
+
     public static IReadOnlyList<CorpusChunk> Load(string directory)
     {
         if (!Directory.Exists(directory))
@@ -66,3 +70,4 @@ public static class CorpusLoader
     private static CorpusChunk Build(string document, int index, string title, StringBuilder body) =>
         new($"{document}#{index}", title, body.ToString().Trim());
 }
+

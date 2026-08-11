@@ -42,6 +42,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - name: Safety suite
+        env:
+          EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+        run: dotnet run --project src/EvalRunner -- safety
       - name: Tier 2 gate
         env:
           EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
@@ -85,4 +90,5 @@ jobs:
         with:
           name: tier3-artifacts
           path: artifacts/runs/
+
 

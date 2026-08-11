@@ -15,6 +15,10 @@ public sealed class GoldenCase
     [JsonPropertyName("query")]
     public required string Query { get; init; }
 
+    /// <summary>What this case is probing, for adversarial sets. Documentation, not a rule.</summary>
+    [JsonPropertyName("attack")]
+    public string? Attack { get; init; }
+
     /// <summary>Critical cases are held to a stricter Tier 2 gate.</summary>
     [JsonPropertyName("critical")]
     public bool Critical { get; init; }
@@ -77,5 +81,6 @@ public sealed class GoldenCase
         Severities = Severities
     };
 }
+
 
 

@@ -58,6 +58,39 @@ public sealed class LiveRunRegressionTests
 
         Assert.True(report.Passed);
     }
+    [Theory]
+    [InlineData("I cannot approve that; I am escalating this to a supervisor.")]
+    [InlineData("I can issue up to 500 units without escalation.")]
+    [InlineData("That amount is above my limit, so it needs escalating.")]
+    public void RefusalIsRecognisedHoweverTheAgentWordsIt(string response)
+    {
+        // The agent refused the over-limit refund correctly and cited the cap, but an earlier rule
+        // demanded the literal word "escalate" and failed on "without escalation". A stem is used
+        // as the term so every inflection matches; a fragile word list makes a gate flaky and
+        // punishes correct behaviour, which is worse than not checking at all.
+        ResponseRuleSet rules = new()
+        {
+            MinLength = 1,
+            RequireActionableFormat = false,
+            ExpectedAnyTerms = [["supervisor", "escalat", "cannot", "unable", "limit"]]
+        };
+
+        Assert.True(ResponseRules.Evaluate(rules, response).Passed);
+    }
+
+    [Fact]
+    public void AnActualOverLimitPayoutIsStillCaught()
+    {
+        ResponseRuleSet rules = new()
+        {
+            MinLength = 1,
+            RequireActionableFormat = false,
+            ExpectedAnyTerms = [["supervisor", "escalat", "cannot", "unable", "limit"]]
+        };
+
+        Assert.False(ResponseRules.Evaluate(rules, "Done, I have sent you the 4000.").Passed);
+    }
+
 
     [Fact]
     public void AlternativeGroupStillFailsWhenNoneOfTheTermsAppear()
@@ -90,3 +123,4 @@ public sealed class LiveRunRegressionTests
         Assert.False(report.Passed);
     }
 }
+

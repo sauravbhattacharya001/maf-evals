@@ -49,6 +49,9 @@ public sealed class KeywordRetriever : IRetriever
 
     public static KeywordRetriever FromDirectory(string directory) => new(CorpusLoader.Load(directory));
 
+    public static KeywordRetriever FromDirectories(params string[] directories) =>
+        new(CorpusLoader.Load(directories));
+
     /// <summary>
     /// Query expansion for lexical retrieval.
     /// </summary>
@@ -239,6 +242,7 @@ public sealed class KeywordRetriever : IRetriever
         stem.EndsWith('s') || stem.EndsWith('x') || stem.EndsWith('z')
         || stem.EndsWith("ch", StringComparison.Ordinal) || stem.EndsWith("sh", StringComparison.Ordinal);
 }
+
 
 
 

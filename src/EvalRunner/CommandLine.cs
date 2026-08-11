@@ -42,6 +42,10 @@ public static class RepoPaths
 
     public static string Calibration => Path.Combine(Root, "datasets", "judge-calibration.jsonl");
 
+    public static string AdversarialCorpus => Path.Combine(Root, "corpus-adversarial");
+
+    public static string AdversarialSet => Path.Combine(Root, "datasets", "adversarial-set.jsonl");
+
     public static string RunsDirectory => Path.Combine(Root, "artifacts", "runs");
 
     public static string CacheDirectory => Path.Combine(Root, "artifacts", "cache");
@@ -75,5 +79,6 @@ public static class RepoPaths
         return Directory.GetCurrentDirectory();
     }
 }
+
 
 
