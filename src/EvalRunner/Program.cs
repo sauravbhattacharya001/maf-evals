@@ -14,6 +14,7 @@ using SupportAgent;
 using SupportAgent.Retrieval;
 
 CommandLine cli = new(args);
+DotEnv.Load();
 
 try
 {

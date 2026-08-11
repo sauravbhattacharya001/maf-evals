@@ -95,7 +95,7 @@ offline. The outcomes are:
 ## Quick start
 
 ```powershell
-dotnet test                                     # 71 offline tests
+dotnet test                                     # 76 offline tests
 dotnet run --project src/EvalRunner -- rules    # rule engine over frozen responses
 dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
 ```
@@ -147,6 +147,7 @@ config/eval-config.json          repetitions, thresholds, baseline
   "query": "I was charged twice for one order...",
   "critical": true,
   "expectedTerms": ["refund", "order number"],
+  "expectedAnyTerms": [["professional", "pharmacist", "doctor"]],
   "forbiddenTerms": ["I can't help", "guaranteed refund"],
   "minLength": 60,
   "requireActionableFormat": true,
@@ -156,8 +157,29 @@ config/eval-config.json          repetitions, thresholds, baseline
 ```
 
 Rules live with the case, so extending coverage is a data change. `critical` cases face a stricter
-Tier 3 gate. `severities` only affects Tier 1; Tier 2 gates on every rule regardless, because a
+Tier 3 gate. `expectedTerms` requires every term; `expectedAnyTerms` requires one term from each
+group, which is what you need when several words satisfy the same policy ("professional" or
+"pharmacist"). `severities` only affects Tier 1; Tier 2 gates on every rule regardless, because a
 warn-level rule failing across the whole golden set is still a regression.
+
+## What the first live run caught
+
+The gate failed on its first real run, which is the outcome it exists for. All three findings were
+defects in this repository, not in the agent:
+
+| Finding | Evidence | Fix |
+| --- | --- | --- |
+| Retrieval missed the shipping policy for "has not arrived" | deterministic chunk check **and** judge Retrieval 1.0 | query expansion, since customers and policies use different words |
+| A rule rejected correct behaviour: the agent said "consult your pharmacist" but the rule demanded "professional" | rule failure on a good response | added `expectedAnyTerms` for alternatives |
+| The response cache never hit in CI | `MemoryDistributedCache` is per-process | file-backed cache under `artifacts/cache` |
+
+After the fixes the gate passed, retrieval for that case went from 1.0 to 4.0, and a re-run served
+entirely from cache: 145 ms mean latency instead of 1883 ms, at no API cost. Each finding is now
+pinned by a regression test in `LiveRunRegressionTests`.
+
+Note the third finding was a documentation lie, not just a bug: the README claimed caching made
+re-runs free while the implementation could not deliver it. The code was fixed rather than the claim
+softened.
 
 ## Configuration
 
@@ -169,8 +191,8 @@ warn-level rule failing across the whole golden set is still a regression.
 | `EVAL_ENDPOINT`, `JUDGE_ENDPOINT` | Optional OpenAI-compatible base URLs |
 
 The judge is configured separately on purpose. Grading a model with itself correlates exactly the
-failure modes you most want to detect. Both clients are wrapped in a response cache, so re-running
-an unchanged prompt is free.
+failure modes you most want to detect. Both clients are wrapped in a file-backed response cache
+under `artifacts/cache`, so re-running an unchanged prompt costs nothing even in a fresh CI process.
 
 ## CI strategy
 
@@ -219,3 +241,4 @@ failing gate defeats the purpose.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+

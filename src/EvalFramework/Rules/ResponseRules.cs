@@ -19,6 +19,11 @@ public static class ResponseRules
             checks.Add(ExpectedTerms(rules, response));
         }
 
+        if (rules.ExpectedAnyTerms.Count > 0)
+        {
+            checks.Add(ExpectedAnyTerms(rules, response));
+        }
+
         if (rules.ForbiddenTerms.Count > 0)
         {
             checks.Add(ForbiddenTerms(rules, response));
@@ -54,6 +59,22 @@ public static class ResponseRules
             missing.Length == 0,
             missing.Length == 0 ? "all expected terms present" : $"missing: {string.Join(", ", missing)}",
             rules.SeverityFor(RuleNames.ExpectedTerms));
+    }
+
+    private static CheckResult ExpectedAnyTerms(ResponseRuleSet rules, string response)
+    {
+        string[] unsatisfied = rules.ExpectedAnyTerms
+            .Where(group => !group.Any(term => response.Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Select(group => $"[{string.Join(" or ", group)}]")
+            .ToArray();
+
+        return new CheckResult(
+            RuleNames.ExpectedAnyTerms,
+            unsatisfied.Length == 0,
+            unsatisfied.Length == 0
+                ? "every alternative group satisfied"
+                : $"no match for: {string.Join(", ", unsatisfied)}",
+            rules.SeverityFor(RuleNames.ExpectedAnyTerms));
     }
 
     private static CheckResult ForbiddenTerms(ResponseRuleSet rules, string response)

@@ -23,6 +23,10 @@ public sealed class GoldenCase
     [JsonPropertyName("expectedTerms")]
     public IReadOnlyList<string> ExpectedTerms { get; init; } = [];
 
+    /// <summary>Groups of alternatives; at least one term from each group must appear.</summary>
+    [JsonPropertyName("expectedAnyTerms")]
+    public IReadOnlyList<IReadOnlyList<string>> ExpectedAnyTerms { get; init; } = [];
+
     /// <summary>Terms that must never appear, such as refusal or unsafe phrasing.</summary>
     [JsonPropertyName("forbiddenTerms")]
     public IReadOnlyList<string> ForbiddenTerms { get; init; } = [];
@@ -53,6 +57,7 @@ public sealed class GoldenCase
     {
         MinLength = MinLength,
         ExpectedTerms = ExpectedTerms,
+        ExpectedAnyTerms = ExpectedAnyTerms,
         ForbiddenTerms = ForbiddenTerms,
         RequireActionableFormat = RequireActionableFormat,
         Severities = Severities

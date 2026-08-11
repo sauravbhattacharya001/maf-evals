@@ -11,6 +11,16 @@ public sealed class ResponseRuleSet
 
     public IReadOnlyList<string> ExpectedTerms { get; init; } = [];
 
+    /// <summary>
+    /// Groups of alternatives; at least one term from each group must appear.
+    /// </summary>
+    /// <remarks>
+    /// Needed because a policy is usually satisfied by any of several words. Demanding the literal
+    /// word "professional" would reject "consult your pharmacist", which is the behaviour actually
+    /// wanted. A rule that fails correct output is a broken rule, not a finding.
+    /// </remarks>
+    public IReadOnlyList<IReadOnlyList<string>> ExpectedAnyTerms { get; init; } = [];
+
     public IReadOnlyList<string> ForbiddenTerms { get; init; } = [];
 
     public bool RequireActionableFormat { get; init; } = true;
@@ -28,6 +38,7 @@ public sealed class ResponseRuleSet
         {
             [RuleNames.MinLength] = RuleSeverity.Retry,
             [RuleNames.ExpectedTerms] = RuleSeverity.Retry,
+            [RuleNames.ExpectedAnyTerms] = RuleSeverity.Retry,
             [RuleNames.ForbiddenTerms] = RuleSeverity.Block,
             [RuleNames.ActionableFormat] = RuleSeverity.Warn
         };
@@ -44,6 +55,7 @@ public static class RuleNames
 {
     public const string MinLength = "min_length";
     public const string ExpectedTerms = "expected_terms";
+    public const string ExpectedAnyTerms = "expected_any_terms";
     public const string ForbiddenTerms = "forbidden_terms";
     public const string ActionableFormat = "actionable_format";
     public const string RequiredArguments = "required_arguments";

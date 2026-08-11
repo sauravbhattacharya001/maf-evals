@@ -8,6 +8,12 @@ TestResults/
 # Transient tool output
 .restore.*
 
+# Local secrets. Never commit.
+.env.local
+
 # Run artifacts are reproducible outputs, not source. Keep the folder, ignore the contents.
 artifacts/runs/*
 !artifacts/runs/.gitkeep
+
+# Cached model responses. Local speed-up only, never source of truth.
+artifacts/cache/

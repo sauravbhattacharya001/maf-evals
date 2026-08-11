@@ -1,8 +1,5 @@
 using System.ClientModel;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
 using OpenAI;
 
 namespace EvalRunner;
@@ -44,10 +41,7 @@ public static class ModelFactory
 
         if (cache)
         {
-            IDistributedCache store = new MemoryDistributedCache(
-                Options.Create(new MemoryDistributedCacheOptions()));
-
-            builder = builder.UseDistributedCache(store);
+            builder = builder.UseDistributedCache(new FileDistributedCache(RepoPaths.CacheDirectory));
         }
 
         return builder.Build();
@@ -81,3 +75,4 @@ public static class ModelFactory
             $"Set one of {string.Join(" or ", names)} to run model-backed tiers.");
     }
 }
+

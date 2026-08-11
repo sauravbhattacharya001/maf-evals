@@ -49,6 +49,36 @@ public sealed class KeywordRetriever : IRetriever
 
     public static KeywordRetriever FromDirectory(string directory) => new(CorpusLoader.Load(directory));
 
+    /// <summary>
+    /// Query expansion for lexical retrieval.
+    /// </summary>
+    /// <remarks>
+    /// Customers and policy documents use different words for the same thing: a customer says an
+    /// order "has not arrived", the policy calls it a "delayed parcel". Pure term matching scores
+    /// that pair at zero, which is the single largest weakness of a lexical retriever. Expansion
+    /// terms are weighted below literal matches so they add recall without dominating ranking.
+    /// An embedding retriever would handle this implicitly, at the cost of reproducibility.
+    /// </remarks>
+    private static readonly Dictionary<string, string[]> Expansions = new(StringComparer.Ordinal)
+    {
+        ["arrived"] = ["delivery", "delivered", "parcel", "tracking", "delayed"],
+        ["arrive"] = ["delivery", "delivered", "parcel", "tracking", "delayed"],
+        ["missing"] = ["lost", "delayed", "investigation", "parcel"],
+        ["late"] = ["delayed", "tracking", "parcel"],
+        ["lost"] = ["missing", "investigation", "carrier"],
+        ["charged"] = ["charge", "payment", "authorisation", "duplicate"],
+        ["twice"] = ["duplicate", "charge"],
+        ["double"] = ["duplicate", "dosage"],
+        ["dose"] = ["dosage", "medication", "pharmacist", "professional"],
+        ["medication"] = ["dosage", "pharmacist", "professional"],
+        ["broken"] = ["damaged"],
+        ["cancel"] = ["cancellation", "renewal", "subscription"],
+        ["weeks"] = ["days", "business"],
+        ["week"] = ["days", "business"]
+    };
+
+    private const double ExpansionWeight = 0.5;
+
     public RetrievalTrace Retrieve(string query, int topK = 3)
     {
         if (topK <= 0)
@@ -56,8 +86,8 @@ public sealed class KeywordRetriever : IRetriever
             throw new ArgumentOutOfRangeException(nameof(topK), "topK must be positive.");
         }
 
-        string[] terms = Tokenize(query).Distinct(StringComparer.Ordinal).ToArray();
-        if (terms.Length == 0)
+        Dictionary<string, double> weights = BuildQueryWeights(query);
+        if (weights.Count == 0)
         {
             return RetrievalTrace.Empty(query);
         }
@@ -70,11 +100,11 @@ public sealed class KeywordRetriever : IRetriever
             int length = Math.Max(1, frequencies.Values.Sum());
             double score = 0d;
 
-            foreach (string term in terms)
+            foreach ((string term, double weight) in weights)
             {
                 if (frequencies.TryGetValue(term, out int count))
                 {
-                    score += count * _inverseDocumentFrequency.GetValueOrDefault(term, 0d);
+                    score += weight * count * _inverseDocumentFrequency.GetValueOrDefault(term, 0d);
                 }
             }
 
@@ -93,6 +123,32 @@ public sealed class KeywordRetriever : IRetriever
             .ToArray();
 
         return new RetrievalTrace(query, best);
+    }
+
+    internal static Dictionary<string, double> BuildQueryWeights(string query)
+    {
+        Dictionary<string, double> weights = new(StringComparer.Ordinal);
+
+        foreach (string term in Tokenize(query))
+        {
+            weights[term] = 1d;
+
+            if (!Expansions.TryGetValue(term, out string[]? expansions))
+            {
+                continue;
+            }
+
+            foreach (string expansion in expansions)
+            {
+                // A literal match always outranks an expanded one.
+                if (!weights.ContainsKey(expansion))
+                {
+                    weights[expansion] = ExpansionWeight;
+                }
+            }
+        }
+
+        return weights;
     }
 
     internal static IEnumerable<string> Tokenize(string text)

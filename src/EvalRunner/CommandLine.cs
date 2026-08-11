@@ -42,6 +42,8 @@ public static class RepoPaths
 
     public static string RunsDirectory => Path.Combine(Root, "artifacts", "runs");
 
+    public static string CacheDirectory => Path.Combine(Root, "artifacts", "cache");
+
     public static string? LatestRun()
     {
         if (!Directory.Exists(RunsDirectory))
@@ -71,3 +73,4 @@ public static class RepoPaths
         return Directory.GetCurrentDirectory();
     }
 }
+
