@@ -1,5 +1,11 @@
 {
-  "repetitions": 5,
+  "tier2Repetitions": 1,
+  "tier3Repetitions": 5,
+  "triad": {
+    "retrieval": { "floor": 3.0, "target": 4.0 },
+    "groundedness": { "floor": 3.0, "target": 4.0 },
+    "relevance": { "floor": 3.0, "target": 4.0 }
+  },
   "minOverallPassRate": 0.80,
   "minCriticalCasePassRate": 1.00,
   "minStandardCasePassRate": 0.60,

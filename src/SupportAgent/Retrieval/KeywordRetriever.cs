@@ -1,0 +1,108 @@
+using EvalFramework.Retrieval;
+namespace SupportAgent.Retrieval;
+
+public interface IRetriever
+{
+    RetrievalTrace Retrieve(string query, int topK = 3);
+}
+
+/// <summary>
+/// A deterministic TF-IDF retriever over the local corpus.
+/// </summary>
+/// <remarks>
+/// Deliberately not an embedding model. Retrieval must be reproducible so that a Tier 2 failure
+/// points at the agent or the corpus rather than at nondeterministic search, and so the whole
+/// pipeline stays runnable offline in tests.
+/// </remarks>
+public sealed class KeywordRetriever : IRetriever
+{
+    private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
+    {
+        "the", "and", "for", "with", "that", "this", "you", "your", "was", "are", "were", "have",
+        "has", "had", "how", "what", "when", "why", "can", "will", "should", "from", "not", "but",
+        "they", "them", "our", "out", "get", "got", "does", "did", "into", "about", "there", "than"
+    };
+
+    private readonly IReadOnlyList<CorpusChunk> _chunks;
+    private readonly IReadOnlyList<Dictionary<string, int>> _termFrequencies;
+    private readonly Dictionary<string, double> _inverseDocumentFrequency;
+
+    public KeywordRetriever(IReadOnlyList<CorpusChunk> chunks)
+    {
+        ArgumentNullException.ThrowIfNull(chunks);
+
+        _chunks = chunks;
+        _termFrequencies = chunks
+            .Select(chunk => Tokenize($"{chunk.Title} {chunk.Text}")
+                .GroupBy(token => token, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal))
+            .ToArray();
+
+        _inverseDocumentFrequency = _termFrequencies
+            .SelectMany(frequencies => frequencies.Keys)
+            .GroupBy(term => term, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => Math.Log(1d + ((double)chunks.Count / group.Count())),
+                StringComparer.Ordinal);
+    }
+
+    public static KeywordRetriever FromDirectory(string directory) => new(CorpusLoader.Load(directory));
+
+    public RetrievalTrace Retrieve(string query, int topK = 3)
+    {
+        if (topK <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(topK), "topK must be positive.");
+        }
+
+        string[] terms = Tokenize(query).Distinct(StringComparer.Ordinal).ToArray();
+        if (terms.Length == 0)
+        {
+            return RetrievalTrace.Empty(query);
+        }
+
+        List<RetrievedChunk> scored = [];
+
+        for (int i = 0; i < _chunks.Count; i++)
+        {
+            Dictionary<string, int> frequencies = _termFrequencies[i];
+            int length = Math.Max(1, frequencies.Values.Sum());
+            double score = 0d;
+
+            foreach (string term in terms)
+            {
+                if (frequencies.TryGetValue(term, out int count))
+                {
+                    score += count * _inverseDocumentFrequency.GetValueOrDefault(term, 0d);
+                }
+            }
+
+            if (score > 0d)
+            {
+                // Normalise so a long chunk does not outrank a precise short one.
+                scored.Add(new RetrievedChunk(
+                    _chunks[i].Id, _chunks[i].Title, _chunks[i].Text, score / Math.Sqrt(length)));
+            }
+        }
+
+        RetrievedChunk[] best = scored
+            .OrderByDescending(chunk => chunk.Score)
+            .ThenBy(chunk => chunk.Id, StringComparer.Ordinal)
+            .Take(topK)
+            .ToArray();
+
+        return new RetrievalTrace(query, best);
+    }
+
+    internal static IEnumerable<string> Tokenize(string text)
+    {
+        return text
+            .Split(
+                [' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '"', '\'', '(', ')', '[', ']', '/', '-', '#'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => token.ToLowerInvariant())
+            .Where(token => token.Length >= 3 && !StopWords.Contains(token));
+    }
+}
+

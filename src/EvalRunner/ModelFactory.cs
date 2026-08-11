@@ -1,23 +1,33 @@
 using System.ClientModel;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using OpenAI;
 
 namespace EvalRunner;
 
 /// <summary>
-/// Builds chat clients from environment variables. The judge is configured separately so a
-/// stronger or simply different model can grade the candidate.
+/// Builds chat clients from environment variables.
 /// </summary>
+/// <remarks>
+/// The judge is configured separately so a different, usually stronger, model can grade the
+/// candidate. Grading a model with itself correlates exactly the failure modes you want to detect.
+/// Both clients are wrapped in a response cache: on a re-run with an unchanged prompt and model the
+/// call is free, which is what makes a triad affordable on every pull request.
+/// </remarks>
 public static class ModelFactory
 {
-    public static (IChatClient Client, string Model) CreateCandidate()
+    public static (IChatClient Client, string Model) CreateCandidate(bool cache = true)
     {
         string key = Required("EVAL_API_KEY", "OPENAI_API_KEY");
         string model = Environment.GetEnvironmentVariable("EVAL_MODEL") ?? "gpt-4o-mini";
-        return (Create(key, model, Environment.GetEnvironmentVariable("EVAL_ENDPOINT")), model);
+        IChatClient client = Create(key, model, Environment.GetEnvironmentVariable("EVAL_ENDPOINT"));
+
+        return (Wrap(client, cache), model);
     }
 
-    public static (IChatClient Client, string Model) CreateJudge()
+    public static (IChatClient Client, string Model) CreateJudge(bool cache = true)
     {
         string key = Environment.GetEnvironmentVariable("JUDGE_API_KEY")
             ?? Required("EVAL_API_KEY", "OPENAI_API_KEY");
@@ -25,7 +35,22 @@ public static class ModelFactory
         string? endpoint = Environment.GetEnvironmentVariable("JUDGE_ENDPOINT")
             ?? Environment.GetEnvironmentVariable("EVAL_ENDPOINT");
 
-        return (Create(key, model, endpoint), model);
+        return (Wrap(Create(key, model, endpoint), cache), model);
+    }
+
+    private static IChatClient Wrap(IChatClient client, bool cache)
+    {
+        ChatClientBuilder builder = client.AsBuilder().UseFunctionInvocation();
+
+        if (cache)
+        {
+            IDistributedCache store = new MemoryDistributedCache(
+                Options.Create(new MemoryDistributedCacheOptions()));
+
+            builder = builder.UseDistributedCache(store);
+        }
+
+        return builder.Build();
     }
 
     private static IChatClient Create(string apiKey, string model, string? endpoint)

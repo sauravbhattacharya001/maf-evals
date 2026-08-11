@@ -1,5 +1,5 @@
 using EvalFramework.Datasets;
-using EvalFramework.Deterministic;
+using EvalFramework.Rules;
 using EvalFramework.Execution;
 using EvalFramework.Statistics;
 
@@ -9,7 +9,7 @@ public sealed class RunAnalyzerTests
 {
     private static readonly EvalConfig Config = new()
     {
-        Repetitions = 4,
+        Tier3Repetitions = 4,
         MinOverallPassRate = 0.50,
         MinCriticalCasePassRate = 1.00,
         MinStandardCasePassRate = 0.50
@@ -39,11 +39,11 @@ public sealed class RunAnalyzerTests
         Repetition = repetition,
         Response = passed ? "a sufficiently long response" : string.Empty,
         LatencyMs = 100,
-        Deterministic = DeterministicEvaluator.Evaluate(source, passed ? "a sufficiently long response" : string.Empty)
+        Rules = ResponseRules.Evaluate(source.ToRuleSet(), passed ? "a sufficiently long response" : string.Empty)
     };
 
     private static RunArtifact Build(params ResponseRecord[] records) =>
-        GoldenSetRunner.Build([Critical, Standard], records, Config, "test-model", "test.jsonl");
+        AgentRunner.Build([Critical, Standard], records, Config.Tier3Repetitions, "tier3", "test-model", "test.jsonl");
 
     [Fact]
     public void IntermittentFailureIsReportedAsFlaky()
@@ -131,3 +131,6 @@ public sealed class RunAnalyzerTests
         Assert.Contains("min_length x2", statistics.TopFailures);
     }
 }
+
+
+

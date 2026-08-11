@@ -1,20 +1,79 @@
 using System.Text;
 using EvalFramework.Execution;
-using EvalFramework.Judging;
+using EvalFramework.RagTriad;
 using EvalFramework.Statistics;
 
 namespace EvalFramework.Reporting;
 
-/// <summary>Human-readable summary intended for pull request comments and CI logs.</summary>
+/// <summary>Human-readable summaries for pull request comments and CI logs.</summary>
 public static class MarkdownReport
 {
+    public static string ForTier2(Tier2Result result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        RunArtifact run = result.Run;
+        StringBuilder builder = new();
+
+        builder.AppendLine($"# Tier 2 gate {(result.Passed ? "PASSED" : "FAILED")}");
+        builder.AppendLine();
+        builder.AppendLine($"- Run: `{run.RunId}`");
+        builder.AppendLine($"- Model: `{run.Model}`");
+        builder.AppendLine($"- Cases: {run.Cases.Count}, rule pass rate {run.OverallPassRate:P0}");
+        builder.AppendLine($"- Mean latency: {run.MeanLatencyMs:F0} ms");
+        builder.AppendLine();
+
+        if (result.Triad.Count > 0)
+        {
+            builder.AppendLine("| Case | Retrieval | Groundedness | Relevance |");
+            builder.AppendLine("| --- | --- | --- | --- |");
+
+            foreach (TriadResult triad in result.Triad)
+            {
+                builder.AppendLine(
+                    $"| {triad.CaseId} | {Cell(triad, TriadMetrics.Retrieval)} " +
+                    $"| {Cell(triad, TriadMetrics.Groundedness)} | {Cell(triad, TriadMetrics.Relevance)} |");
+            }
+
+            builder.AppendLine();
+        }
+
+        int retried = run.Responses.Count(record => record.Attempts > 1);
+        int rejected = run.Responses.Sum(record => record.RejectedToolCalls.Count);
+        builder.AppendLine($"Tier 1 activity: {retried} response retry(ies), {rejected} tool call(s) rejected.");
+
+        if (result.Warnings.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Warnings");
+            foreach (string warning in result.Warnings)
+            {
+                builder.AppendLine($"- {warning}");
+            }
+        }
+
+        if (!result.Passed)
+        {
+            builder.AppendLine();
+            builder.AppendLine("## Blocking violations");
+            foreach (GateViolation violation in result.Violations)
+            {
+                builder.AppendLine($"- **{violation.Gate}**: {violation.Detail}");
+            }
+        }
+
+        return builder.ToString();
+    }
+
     public static string ForRun(RunArtifact run, GateReport gates)
     {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(gates);
+
         StringBuilder builder = new();
-        builder.AppendLine($"# Tier 2 run {run.RunId}");
+        builder.AppendLine($"# {run.Tier} run {run.RunId}");
         builder.AppendLine();
         builder.AppendLine($"- Model: `{run.Model}`");
-        builder.AppendLine($"- Dataset: `{run.DatasetPath}`");
         builder.AppendLine($"- Repetitions: {run.Repetitions}");
         builder.AppendLine($"- Overall pass rate: **{run.OverallPassRate:P1}** " +
             $"(95% CI {run.OverallLowerBound:P1} to {run.OverallUpperBound:P1})");
@@ -47,23 +106,20 @@ public static class MarkdownReport
         return builder.ToString();
     }
 
-    public static string ForJudge(JudgeArtifact artifact)
+    private static string Cell(TriadResult triad, string metric)
     {
-        StringBuilder builder = new();
-        builder.AppendLine($"# Tier 3 judgement of run {artifact.SourceRunId}");
-        builder.AppendLine();
-        builder.AppendLine($"- Judge model: `{artifact.JudgeModel}`");
-        builder.AppendLine($"- Rubric: `{artifact.RubricVersion}`");
-        builder.AppendLine($"- Responses judged: {artifact.Judged.Count}");
-        builder.AppendLine();
-        builder.AppendLine("| Metric | Mean | Min | Scored |");
-        builder.AppendLine("| --- | --- | --- | --- |");
+        TriadScore? score = triad.Scores.FirstOrDefault(item => item.Metric == metric);
 
-        foreach (MetricSummary metric in artifact.Summary)
-        {
-            builder.AppendLine($"| {metric.Name} | {metric.Mean:F2} | {metric.Min:F2} | {metric.Scored} |");
-        }
-
-        return builder.ToString();
+        return score is null
+            ? "-"
+            : $"{score.Score?.ToString("F1") ?? "n/a"} {Marker(score.Verdict)}";
     }
+
+    private static string Marker(TriadVerdict verdict) => verdict switch
+    {
+        TriadVerdict.Pass => "ok",
+        TriadVerdict.Warn => "warn",
+        TriadVerdict.Fail => "FAIL",
+        _ => "?"
+    };
 }

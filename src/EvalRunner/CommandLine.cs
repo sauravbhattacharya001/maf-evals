@@ -21,6 +21,8 @@ public sealed class CommandLine(string[] args)
     public int? IntOption(string name) =>
         int.TryParse(Option(name), out int value) ? value : null;
 
+    public bool HasFlag(string name) => args.Skip(1).Contains(name, StringComparer.Ordinal);
+
     public double DoubleOption(string name, double fallback) =>
         double.TryParse(Option(name), out double value) ? value : fallback;
 }
@@ -36,6 +38,8 @@ public static class RepoPaths
 
     public static string Config => Path.Combine(Root, "config", "eval-config.json");
 
+    public static string Corpus => Path.Combine(Root, "corpus");
+
     public static string RunsDirectory => Path.Combine(Root, "artifacts", "runs");
 
     public static string? LatestRun()
@@ -45,7 +49,7 @@ public static class RepoPaths
             return null;
         }
 
-        return Directory.EnumerateFiles(RunsDirectory, "tier2-*.json")
+        return Directory.EnumerateFiles(RunsDirectory, "tier*.json")
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
     }

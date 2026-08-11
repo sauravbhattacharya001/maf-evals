@@ -1,5 +1,5 @@
 using EvalFramework.Datasets;
-using EvalFramework.Deterministic;
+using EvalFramework.Rules;
 
 namespace EvalFramework.Tests;
 
@@ -51,7 +51,7 @@ public sealed class GoldenSetTests
         {
             Assert.True(lookup.ContainsKey(goldenCase.Id), $"No recorded response for {goldenCase.Id}.");
 
-            DeterministicResult result = DeterministicEvaluator.Evaluate(goldenCase, lookup[goldenCase.Id]);
+            RuleReport result = ResponseRules.Evaluate(goldenCase.ToRuleSet(), lookup[goldenCase.Id]);
 
             Assert.True(
                 result.Passed,
@@ -79,3 +79,4 @@ public sealed class GoldenSetTests
         }
     }
 }
+

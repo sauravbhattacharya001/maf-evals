@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using EvalFramework.Rules;
 
 namespace EvalFramework.Datasets;
 
@@ -32,4 +33,28 @@ public sealed class GoldenCase
     /// <summary>Requires a numbered or bulleted list, used for "give me steps" cases.</summary>
     [JsonPropertyName("requireActionableFormat")]
     public bool RequireActionableFormat { get; init; } = true;
+
+    /// <summary>
+    /// Corpus chunk ids retrieval must return for this case. Checked deterministically, so a
+    /// retrieval regression is caught without spending a judge call.
+    /// </summary>
+    [JsonPropertyName("expectedChunkIds")]
+    public IReadOnlyList<string> ExpectedChunkIds { get; init; } = [];
+
+    /// <summary>
+    /// Optional per-rule severity overrides. Only Tier 1 honours these; Tier 2 gates on
+    /// every rule regardless.
+    /// </summary>
+    [JsonPropertyName("severities")]
+    public IReadOnlyDictionary<string, RuleSeverity> Severities { get; init; } =
+        new Dictionary<string, RuleSeverity>();
+
+    public ResponseRuleSet ToRuleSet() => new()
+    {
+        MinLength = MinLength,
+        ExpectedTerms = ExpectedTerms,
+        ForbiddenTerms = ForbiddenTerms,
+        RequireActionableFormat = RequireActionableFormat,
+        Severities = Severities
+    };
 }

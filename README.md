@@ -1,95 +1,142 @@
 # Three-Tier Agent Evaluation
 
-A working reference implementation of a three-tier evaluation strategy for LLM agents, built on
-Microsoft Agent Framework (.NET 8).
+A reference implementation of a three-tier evaluation strategy for LLM agents, built on Microsoft
+Agent Framework (.NET 8).
 
-The tiers are separated because they answer different questions:
+The tiers are not three sizes of the same test. They run in different places, at different times,
+and answer different questions.
 
-| Tier | Question | Model calls | Deterministic | CI |
-| --- | --- | --- | --- | --- |
-| 1. Deterministic | Do known-good responses still satisfy our rules? | none | yes | every PR |
-| 2. Statistical golden set | How reliably does the real agent satisfy those rules? | candidate only | scoring is | scheduled / manual |
-| 3. Model as judge | Is the output actually any good? | judge only | no | scheduled / manual |
+| | Tier 1 | Tier 2 | Tier 3 |
+| --- | --- | --- | --- |
+| Runs | inside the agent, every request | CI, every pull request | scheduled, or after an incident |
+| Question | can this response go out? | may this change merge? | how reliable is it, and what went wrong? |
+| Checks | tool arguments, then final response | rules, retrieval, RAG triad | repetition, intervals, incident replay |
+| Model calls | none of its own | candidate + judge, cached | candidate + judge, many |
+| On failure | retry, then per-rule severity | block the merge | report and explain |
 
 ## Core principle
 
-Most agent evaluation fails in one of two ways: asserting exact strings against a stochastic system,
-or asking a model to grade everything. This framework avoids both.
+Cheap deterministic checks run constantly. Expensive judge calls run rarely. Statistics run when
+there is time to gather them. Each tier only does what the tier below it cannot.
 
-- **If a rule can be written as code, it belongs in Tier 1.** Rules are cheap, instant, and
-  never disagree with themselves.
-- **A single run proves nothing.** Tier 2 repeats every case and reports a confidence interval,
-  because a 5-for-5 pass is not evidence of a 100% pass rate.
-- **A judge should only score what a rule cannot.** Tier 3 covers relevance and coherence, not
-  formatting or required disclosures.
-- **Never pay twice for the same response.** Tier 3 reads the responses Tier 2 already recorded.
+- **Tier 1 is code, not a test.** It ships with the agent and fires on live traffic.
+- **A rule beats a judge** whenever the property can be expressed as a rule. Judges are for
+  relevance and groundedness, not for formatting or required disclosures.
+- **Never pay twice for a response.** The triad scores responses that Tier 2 already generated.
+- **One pass proves nothing**, which is why reliability claims live in Tier 3, not in the PR gate.
 
-## Data flow
+## Tier 1: hot-path guardrails
 
-```text
-datasets/support-golden-set.jsonl
-        |
-        |  frozen responses                 live agent, N repetitions
-        v                                            v
-  Tier 1  ──────── same scorer ────────────────►  Tier 2
-  pass/fail                                    pass rate + Wilson CI + gates
-                                                     |
-                                                     v
-                                          artifacts/runs/tier2-<id>.json
-                                                     |
-                                                     v
-                                                  Tier 3
-                                        judge scores over saved responses
-                                                     |
-                                                     v
-                                          artifacts/runs/tier3-<id>.json
+Two layers, both inside the ReAct loop.
+
+**Layer A validates tool arguments before the tool runs.** On violation it does not call the tool;
+it returns an explanation as the tool result, which the model reads on its next iteration and
+corrects from. This costs nothing extra, because the loop was already going to iterate, and it
+prevents side effects a later retry could not undo.
+
+**Layer B validates the final response and retries with corrective feedback**, naming the rules that
+failed.
+
+Severity decides what happens when retries run out:
+
+| Severity | Behaviour |
+| --- | --- |
+| `Warn` | record it, let the response through, do not spend a retry |
+| `Retry` | retry, then degrade to a warning |
+| `Block` | retry, then throw; the response must never reach a user |
+
+```csharp
+new AIAgentBuilder(inner)
+    .Use(retrievalAugmenter)   // outermost: context fixed across retries
+    .UseResponseGuard(guard)   // layer B
+    .UseToolGuard(toolGuard)   // layer A, innermost
+    .Build();
 ```
 
-Tier 1 and Tier 2 call the exact same scorer (`DeterministicEvaluator`). Tier 1 proves the rules
-behave correctly; Tier 2 measures how often a real agent satisfies them.
+Retrieval sits outside the retry loop deliberately. If it ran inside, every retry would re-retrieve
+and the captured trace would no longer describe the context that produced the final answer.
+
+## Tier 2: the pull-request gate
+
+One pass per case. Three kinds of check, in increasing cost:
+
+1. **Rules** — the same engine Tier 1 uses, so a rule cannot drift between production and CI.
+2. **Retrieval expectations** — did the expected corpus chunks come back? Deterministic, no judge.
+3. **RAG triad** — retrieval, groundedness, and answer relevance, scored by a judge model.
+
+Each triad metric separates a distinct failure: retrieval catches a bad knowledge base or query,
+groundedness catches invention beyond the context, relevance catches well-grounded answers that
+miss the question. A single quality score would blur all three.
+
+### Threshold bands
+
+A judge is stochastic, so a single cut-off makes a borderline score a coin flip that blocks a merge.
+Each metric has two thresholds:
+
+```json
+{ "floor": 3.0, "target": 4.0 }
+```
+
+Below the floor blocks. Between floor and target warns. Deterministic checks have no band: they
+always block, because they cannot flake.
+
+## Tier 3: reliability and forensics
+
+**Scheduled** (`tier3`): many repetitions, Wilson 95% intervals, per-case flakiness, and drift
+against a baseline. With 5 passes out of 5 the naive interval reads 100% to 100%; Wilson reads
+roughly 57% to 100%, which correctly says you have not yet earned a reliability claim.
+
+**Incident** (`tier3 --incident`): replays a captured production trace against today's rules. Fully
+offline. The outcomes are:
+
+- Rules catch it: the guard now covers what production missed.
+- Nothing catches it: add a golden case, or a recurrence will not be caught either.
 
 ## Quick start
 
 ```powershell
-dotnet test                                    # framework unit tests, offline
-dotnet run --project src/EvalRunner -- tier1   # deterministic checks, offline
+dotnet test                                     # 71 offline tests
+dotnet run --project src/EvalRunner -- rules    # rule engine over frozen responses
+dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
 ```
 
-Model-backed tiers need credentials:
+All three run without credentials. Model-backed tiers need a key:
 
 ```powershell
 $env:EVAL_API_KEY = "..."
 $env:EVAL_MODEL   = "gpt-4o-mini"
+$env:JUDGE_MODEL  = "gpt-4o"
 
 dotnet run --project src/EvalRunner -- tier2
-dotnet run --project src/EvalRunner -- tier3
+dotnet run --project src/EvalRunner -- tier3 --repetitions 5
 ```
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `tier1` | Deterministic rules over frozen responses |
-| `tier2 [--repetitions N]` | Run the agent over the golden set, apply statistical gates |
-| `tier3 [--run PATH] [--sample-per-case N] [--min-mean X] [--min-score X]` | Judge a Tier 2 artifact |
-| `report [--run PATH]` | Print the Markdown report for a Tier 2 artifact |
+| `rules` | Rule engine over frozen responses, offline |
+| `tier2 [--repetitions N] [--no-triad]` | PR gate; `--no-triad` skips judge calls |
+| `tier3 [--repetitions N]` | Scheduled reliability run |
+| `tier3 --incident PATH [--judge]` | Replay a production trace |
+| `report [--run PATH]` | Print a saved run artifact |
 
-Exit codes: `0` pass, `1` gate failure, `2` configuration error. Tier 3 defaults to the most recent
-Tier 2 artifact when `--run` is omitted.
+Exit codes: `0` pass, `1` gate failure, `2` configuration error.
 
 ## Layout
 
 ```text
-datasets/support-golden-set.jsonl        golden cases, one JSON object per line
-datasets/tier1-recorded-responses.json   frozen responses for Tier 1
-config/eval-config.json                  repetitions, thresholds, baseline
-rubrics/support-quality-v1.md            versioned judge rubric
-src/EvalFramework/Deterministic/         Tier 1 rules
-src/EvalFramework/Execution/             Tier 2 runner and run artifact schema
-src/EvalFramework/Statistics/            Wilson intervals, aggregation, gates
-src/EvalFramework/Judging/               Tier 3 judging and score aggregation
-src/EvalRunner/                          CLI
-artifacts/runs/                          versioned run artifacts
+src/SupportAgent/Guardrails/     Tier 1: tool guard, response guard, severity policy
+src/SupportAgent/Retrieval/      corpus loader, deterministic TF-IDF retriever
+src/SupportAgent/SupportPolicy   rules declared inline with the agent
+src/EvalFramework/Rules/         shared rule engine used by all three tiers
+src/EvalFramework/RagTriad/      triad evaluators and threshold bands
+src/EvalFramework/Statistics/    Wilson intervals, Tier 2 and Tier 3 gates
+src/EvalFramework/Incident/      trace schema and replay
+corpus/                          markdown knowledge base
+datasets/                        golden set and frozen responses
+incidents/                       captured production traces
+config/eval-config.json          repetitions, thresholds, baseline
 ```
 
 ## Golden case schema
@@ -97,106 +144,75 @@ artifacts/runs/                          versioned run artifacts
 ```json
 {
   "id": "double-charge",
-  "query": "I was charged twice for one order. How do I get the extra charge refunded?",
+  "query": "I was charged twice for one order...",
   "critical": true,
   "expectedTerms": ["refund", "order number"],
-  "forbiddenTerms": ["I can't help", "guaranteed"],
+  "forbiddenTerms": ["I can't help", "guaranteed refund"],
   "minLength": 60,
-  "requireActionableFormat": true
+  "requireActionableFormat": true,
+  "expectedChunkIds": ["refunds#1"],
+  "severities": { "expected_terms": "Block" }
 }
 ```
 
-Rules live with the case, so extending coverage is usually a data change rather than a code change.
-`critical` cases are held to a stricter Tier 2 gate: they are the behaviours you are unwilling to
-regress, such as refusing to give medical advice.
-
-## Why Wilson intervals
-
-With 5 repetitions and 5 passes, the naive interval is 100% to 100%. That is the exact false
-confidence Tier 2 exists to prevent. The Wilson score interval gives roughly 57% to 100% for that
-sample, correctly saying you have not yet earned a strong reliability claim.
-
-Consequences for gate design:
-
-- The overall gate compares the **lower bound** against `minOverallPassRate`, so passing requires
-  either a high pass rate or enough repetitions.
-- Per-case gates use the observed rate, since critical cases are typically all-or-nothing.
-- A case that both passes and fails across repetitions is reported as `flaky`. Flakiness is a
-  finding, not noise to be retried away.
+Rules live with the case, so extending coverage is a data change. `critical` cases face a stricter
+Tier 3 gate. `severities` only affects Tier 1; Tier 2 gates on every rule regardless, because a
+warn-level rule failing across the whole golden set is still a regression.
 
 ## Configuration
-
-`config/eval-config.json`:
-
-| Field | Meaning |
-| --- | --- |
-| `repetitions` | Runs per case, default 5 |
-| `minOverallPassRate` | Required 95% lower bound overall |
-| `minCriticalCasePassRate` | Required rate for critical cases |
-| `minStandardCasePassRate` | Required rate for other cases |
-| `maxRegression` | Allowed drop from `baselineOverallPassRate` |
-| `baselineOverallPassRate` | Last approved pass rate, `null` until you set one |
-| `maxMeanLatencyMs` | Optional latency budget |
-
-Environment variables:
 
 | Variable | Purpose |
 | --- | --- |
 | `EVAL_API_KEY` / `OPENAI_API_KEY` | Candidate agent credential |
 | `EVAL_MODEL` | Candidate model, default `gpt-4o-mini` |
-| `EVAL_ENDPOINT` | Optional OpenAI-compatible base URL |
-| `JUDGE_API_KEY`, `JUDGE_MODEL`, `JUDGE_ENDPOINT` | Judge configuration, defaults to `gpt-4o` |
+| `JUDGE_API_KEY`, `JUDGE_MODEL` | Judge, default `gpt-4o` |
+| `EVAL_ENDPOINT`, `JUDGE_ENDPOINT` | Optional OpenAI-compatible base URLs |
 
-The judge is configured separately on purpose. Using one model to grade itself correlates the
-failure modes you most want to detect.
+The judge is configured separately on purpose. Grading a model with itself correlates exactly the
+failure modes you most want to detect. Both clients are wrapped in a response cache, so re-running
+an unchanged prompt is free.
 
 ## CI strategy
 
-`.github/workflows/evals.yml` runs Tier 1 and the unit tests on every pull request, with no secrets.
-Tiers 2 and 3 run on a schedule or on demand, and upload their artifacts. This keeps PR feedback
-fast and deterministic while reliability and quality are tracked over time rather than per commit.
+Offline tests, the rule check, and incident replay run on every pull request with no secrets.
+
+Tier 2 needs credentials to generate responses at all, so **fork pull requests cannot run it**. They
+receive an explicit skipped status rather than a misleading green, and a maintainer runs Tier 2 from
+a branch in the repository before merging. Tier 3 runs on a schedule.
 
 ## Extending
 
-**Add a case:** append a line to the JSONL file, add a frozen response for Tier 1, run `tier1`.
-`GoldenSetTests` fails if a case has no recorded response or if a frozen response violates its own
-rules.
+**Add a case:** append a line to the JSONL file, add a frozen response, run `rules`. `GoldenSetTests`
+fails if a case has no recorded response or if a frozen response breaks its own rules.
 
-**Add a rule:** add a check to `DeterministicEvaluator` and a test showing it fails when it should.
-Prefer data-driven rules on `GoldenCase` over hard-coded logic.
+**Add a rule:** add it to `ResponseRules` or `ToolArgumentRules`, give it a default severity, and add
+a test proving it fails when it should. Both tiers pick it up automatically.
 
-**Change the rubric:** copy `rubrics/support-quality-v1.md` to a new version and update the version
-string. Never edit a rubric in place, because scores from different rubrics are not comparable.
+**Add a tool guard:** declare a `ToolArgumentRule` in `SupportPolicy.ToolRules` next to the tool.
 
-**Update the baseline:** only after a Tier 2 run is green and the change is intentional. Record the
-new `baselineOverallPassRate`. Raising a baseline to make a failing gate pass defeats the purpose.
+**After an incident:** capture a trace into `incidents/`, run replay, and add a golden case if the
+report says the incident was unexplained by rules.
+
+**Update the baseline:** only after an intentional, green Tier 3 run. Raising a baseline to silence a
+failing gate defeats the purpose.
 
 ## Anti-patterns this design rejects
 
 - Asserting exact model output in unit tests.
-- Running each case once and treating the result as a pass rate.
-- Retrying until green and calling the flake resolved.
+- Running a case once and calling the result a pass rate.
+- Retrying until green and calling the flake fixed.
 - Using a judge for anything a rule could check.
 - Grading a model with itself.
-- Comparing scores across different judge models or rubric versions.
-
-## Cost and reproducibility
-
-Tier 1 is free and fully reproducible. Tier 2 cost scales with cases times repetitions. Tier 3
-defaults to `--sample-per-case 1`, since judging every repetition is usually wasteful when Tier 2
-already measured consistency.
-
-Every run artifact records the model, dataset path, repetition count, timestamp, and full responses,
-so any reported number can be traced back to the exact outputs that produced it.
+- Comparing scores across different judge models or threshold settings.
 
 ## Limitations
 
-- Tier 2 and Tier 3 require credentials and are not exercised by the offline test suite.
-- Judge scores are calibrated for stronger judge models; small local models degrade rubric adherence.
-- Groundedness and tool-call accuracy are not yet wired in; they need per-case context and tool
-  definitions on the golden case schema.
-- There is no human-label calibration set yet, so judge thresholds are conventional rather than
-  empirically tuned.
+- Tier 2 and scheduled Tier 3 need credentials and are not covered by the offline suite.
+- Threshold bands are conventional starting values, not calibrated against human labels.
+- The retriever is TF-IDF, chosen for reproducibility; a production system would swap in embeddings
+  behind the same `IRetriever` interface.
+- With a session, a Tier 1 retry sends only the correction, so the failed attempt stays in
+  conversation history.
 
 ## References
 

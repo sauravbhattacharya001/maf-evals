@@ -28,11 +28,11 @@ public static class RunAnalyzer
             {
                 ResponseRecord[] records = group.ToArray();
                 int trials = records.Length;
-                int passes = records.Count(record => record.Deterministic.Passed);
+                int passes = records.Count(record => record.Rules.Passed && !record.Blocked);
                 ConfidenceInterval interval = Wilson.Interval(passes, trials);
 
                 string[] topFailures = records
-                    .SelectMany(record => record.Deterministic.Failures)
+                    .SelectMany(record => record.Rules.Failures)
                     .GroupBy(failure => failure.Name, StringComparer.Ordinal)
                     .OrderByDescending(failures => failures.Count())
                     .Select(failures => $"{failures.Key} x{failures.Count()}")
@@ -97,3 +97,4 @@ public static class RunAnalyzer
         return new GateReport(violations);
     }
 }
+

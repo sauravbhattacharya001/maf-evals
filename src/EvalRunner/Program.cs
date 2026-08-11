@@ -1,14 +1,17 @@
 using System.Text.Json;
 using EvalFramework;
 using EvalFramework.Datasets;
-using EvalFramework.Deterministic;
 using EvalFramework.Execution;
-using EvalFramework.Judging;
+using EvalFramework.Incident;
+using EvalFramework.RagTriad;
 using EvalFramework.Reporting;
+using EvalFramework.Rules;
 using EvalFramework.Statistics;
 using EvalRunner;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using SupportAgent;
+using SupportAgent.Retrieval;
 
 CommandLine cli = new(args);
 
@@ -16,7 +19,7 @@ try
 {
     return cli.Command switch
     {
-        "tier1" => Tier1(),
+        "rules" => Rules(),
         "tier2" => await Tier2Async(cli),
         "tier3" => await Tier3Async(cli),
         "report" => Report(cli),
@@ -29,8 +32,9 @@ catch (InvalidOperationException error)
     return 2;
 }
 
-// Tier 1: deterministic rules over frozen responses. No credentials, no network, no flake.
-static int Tier1()
+// Offline check of the rule engine itself against frozen responses. Tier 1 proper runs
+// inside the agent at request time; this proves the rules it depends on still behave.
+static int Rules()
 {
     IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
     RecordedResponseSet recorded = RecordedResponseSet.Load(RepoPaths.RecordedResponses);
@@ -39,7 +43,7 @@ static int Tier1()
         .ToDictionary(item => item.CaseId, item => item.Response, StringComparer.OrdinalIgnoreCase);
 
     int failures = 0;
-    Console.WriteLine($"Tier 1 deterministic checks over {cases.Count} cases\n");
+    Console.WriteLine($"Rule checks over {cases.Count} frozen responses\n");
 
     foreach (GoldenCase goldenCase in cases)
     {
@@ -50,15 +54,15 @@ static int Tier1()
             continue;
         }
 
-        DeterministicResult result = DeterministicEvaluator.Evaluate(goldenCase, response);
-        Console.WriteLine($"[{(result.Passed ? "PASS" : "FAIL")}] {goldenCase.Id}");
+        RuleReport report = ResponseRules.Evaluate(goldenCase.ToRuleSet(), response);
+        Console.WriteLine($"[{(report.Passed ? "PASS" : "FAIL")}] {goldenCase.Id}");
 
-        foreach (CheckResult check in result.Checks.Where(check => !check.Passed))
+        foreach (CheckResult check in report.Failures)
         {
-            Console.WriteLine($"        {check.Name}: {check.Detail}");
+            Console.WriteLine($"        {check.Severity.ToString().ToUpperInvariant()} {check.Name}: {check.Detail}");
         }
 
-        if (!result.Passed)
+        if (!report.Passed)
         {
             failures++;
         }
@@ -68,33 +72,69 @@ static int Tier1()
     return failures == 0 ? 0 : 1;
 }
 
-// Tier 2: reliability of the real agent, measured over repeated runs.
+// Tier 2: the pull-request gate. One pass per case, rules plus the RAG triad.
 static async Task<int> Tier2Async(CommandLine cli)
 {
     IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
-    EvalConfig config = LoadConfig(cli.IntOption("--repetitions"));
+    EvalConfig config = LoadConfig();
+    int repetitions = cli.IntOption("--repetitions") ?? config.Tier2Repetitions;
 
-    (IChatClient client, string model) = ModelFactory.CreateCandidate();
-    AIAgent agent = new ChatClientAgent(
-        client,
-        instructions: """
-            You are a customer support agent. Answer concisely and politely.
-            Give numbered steps, state exactly what information support will need,
-            and never give medical, legal, or financial advice.
-            """,
-        name: "SupportAgent");
+    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent();
 
-    Console.WriteLine($"Tier 2: {cases.Count} cases x {config.Repetitions} repetitions on {model}\n");
-
+    Console.WriteLine($"Tier 2: {cases.Count} cases x {repetitions} on {model}\n");
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
-    RunArtifact run = await new GoldenSetRunner(agent, model)
-        .RunAsync(cases, config, RepoPaths.GoldenSet, progress);
 
-    Directory.CreateDirectory(RepoPaths.RunsDirectory);
-    string path = Path.Combine(RepoPaths.RunsDirectory, $"tier2-{run.RunId}.json");
-    File.WriteAllText(path, JsonSerializer.Serialize(run, JsonDefaults.Options));
+    RunArtifact run = await new AgentRunner(agent, model, telemetry)
+        .RunAsync(cases, repetitions, tier: "tier2", RepoPaths.GoldenSet, progress);
+
+    List<TriadResult> triad = [];
+
+    if (!cli.HasFlag("--no-triad"))
+    {
+        (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge();
+        Console.WriteLine($"\nJudging with {judgeModel}");
+
+        TriadEvaluator evaluator = new(judgeClient, config.Triad);
+
+        foreach (ResponseRecord record in run.Responses.Where(record => !record.Blocked))
+        {
+            triad.Add(await evaluator.EvaluateAsync(record, progress));
+        }
+    }
+
+    Tier2Result result = Tier2Gate.Apply(run, cases, triad, config.Triad);
+    string path = Save($"tier2-{run.RunId}.json", result);
+
+    Console.WriteLine();
+    Console.WriteLine(MarkdownReport.ForTier2(result));
+    Console.WriteLine($"artifact: {path}");
+
+    return result.Passed ? 0 : 1;
+}
+
+// Tier 3: scheduled reliability measurement, or forensic replay of one incident.
+static async Task<int> Tier3Async(CommandLine cli)
+{
+    if (cli.Option("--incident") is string incidentPath)
+    {
+        return await ReplayIncidentAsync(cli, incidentPath);
+    }
+
+    IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
+    EvalConfig config = LoadConfig();
+    int repetitions = cli.IntOption("--repetitions") ?? config.Tier3Repetitions;
+
+    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent();
+
+    Console.WriteLine($"Tier 3: {cases.Count} cases x {repetitions} on {model}\n");
+    Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
+
+    RunArtifact run = await new AgentRunner(agent, model, telemetry)
+        .RunAsync(cases, repetitions, tier: "tier3", RepoPaths.GoldenSet, progress);
 
     GateReport gates = RunAnalyzer.ApplyGates(run, config);
+    string path = Save($"tier3-{run.RunId}.json", run);
+
     Console.WriteLine();
     Console.WriteLine(MarkdownReport.ForRun(run, gates));
     Console.WriteLine($"artifact: {path}");
@@ -102,69 +142,100 @@ static async Task<int> Tier2Async(CommandLine cli)
     return gates.Passed ? 0 : 1;
 }
 
-// Tier 3: judge the responses Tier 2 already paid for.
-static async Task<int> Tier3Async(CommandLine cli)
-{
-    string runPath = cli.Option("--run")
-        ?? RepoPaths.LatestRun()
-        ?? throw new InvalidOperationException("No Tier 2 artifact found. Run tier2 first.");
-
-    RunArtifact run = LoadRun(runPath);
-    (IChatClient client, string model) = ModelFactory.CreateJudge();
-
-    Console.WriteLine($"Tier 3: judging run {run.RunId} with {model}\n");
-
-    Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
-    JudgeArtifact artifact = await new JudgeRunner(client, model, "support-quality-v1")
-        .JudgeAsync(run, cli.IntOption("--sample-per-case") ?? 1, progress);
-
-    string path = Path.Combine(RepoPaths.RunsDirectory, $"tier3-{run.RunId}.json");
-    File.WriteAllText(path, JsonSerializer.Serialize(artifact, JsonDefaults.Options));
-
-    Console.WriteLine();
-    Console.WriteLine(MarkdownReport.ForJudge(artifact));
-    Console.WriteLine($"artifact: {path}");
-
-    IReadOnlyList<string> violations = JudgeSummarizer.ApplyThresholds(
-        artifact.Summary,
-        cli.DoubleOption("--min-mean", 4.0),
-        cli.DoubleOption("--min-score", 3.0));
-
-    foreach (string violation in violations)
-    {
-        Console.WriteLine($"gate violation: {violation}");
-    }
-
-    return violations.Count == 0 ? 0 : 1;
-}
-
 static int Report(CommandLine cli)
 {
-    string runPath = cli.Option("--run")
+    string path = cli.Option("--run")
         ?? RepoPaths.LatestRun()
-        ?? throw new InvalidOperationException("No Tier 2 artifact found.");
+        ?? throw new InvalidOperationException("No run artifact found.");
 
-    RunArtifact run = LoadRun(runPath);
-    Console.WriteLine(MarkdownReport.ForRun(run, RunAnalyzer.ApplyGates(run, LoadConfig(null))));
+    using FileStream stream = File.OpenRead(path);
+    RunArtifact run = JsonSerializer.Deserialize<RunArtifact>(stream, JsonDefaults.Options)
+        ?? throw new InvalidOperationException($"{path} is not a valid run artifact.");
+
+    Console.WriteLine(MarkdownReport.ForRun(run, RunAnalyzer.ApplyGates(run, LoadConfig())));
     return 0;
 }
 
-static RunArtifact LoadRun(string path)
+// Replays a captured production trace against today's rules. Fully offline unless a judge is asked for.
+static async Task<int> ReplayIncidentAsync(CommandLine cli, string incidentPath)
 {
-    using FileStream stream = File.OpenRead(path);
-    return JsonSerializer.Deserialize<RunArtifact>(stream, JsonDefaults.Options)
-        ?? throw new InvalidOperationException($"{path} is not a valid Tier 2 artifact.");
+    IncidentTrace trace = IncidentTrace.Load(incidentPath);
+    IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
+    EvalConfig config = LoadConfig();
+
+    GoldenCase? related = cases.FirstOrDefault(item =>
+        string.Equals(item.Id, trace.RelatedCaseId, StringComparison.OrdinalIgnoreCase));
+
+    TriadResult? triad = null;
+
+    if (cli.HasFlag("--judge"))
+    {
+        (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge();
+        Console.WriteLine($"Judging incident with {judgeModel}\n");
+
+        RuleReport rules = ResponseRules.Evaluate(
+            related?.ToRuleSet() ?? SupportPolicy.BaselineRules, trace.Response);
+
+        triad = await new TriadEvaluator(judgeClient, config.Triad)
+            .EvaluateAsync(IncidentReplay.ToResponseRecord(trace, rules));
+    }
+
+    IncidentReport report = IncidentReplay.Replay(trace, related, SupportPolicy.ToolRules, SupportPolicy.BaselineRules, triad);
+    string path = Save($"incident-{trace.IncidentId}.json", report);
+
+    Console.WriteLine($"# Incident {report.IncidentId}");
+    Console.WriteLine($"Related case: {report.RelatedCaseId ?? "none"}\n");
+
+    foreach (CheckResult failure in report.RuleFailures)
+    {
+        Console.WriteLine($"  rule      {failure.Severity}: {failure.Name} ({failure.Detail})");
+    }
+
+    foreach (string failure in report.ToolFailures)
+    {
+        Console.WriteLine($"  tool      {failure}");
+    }
+
+    foreach (string chunk in report.MissingChunks)
+    {
+        Console.WriteLine($"  retrieval missing chunk {chunk}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine(report.UnexplainedByRules
+        ? "No deterministic rule explains this incident. Add a golden case, or a recurrence will not be caught."
+        : "Current rules would have caught this incident.");
+
+    Console.WriteLine($"artifact: {path}");
+
+    // Replay is a diagnostic, not a gate, so a caught incident is a success.
+    return 0;
 }
 
-static EvalConfig LoadConfig(int? repetitionOverride)
+static (AIAgent Agent, IRunTelemetrySource Telemetry, string Model) BuildAgent()
+{
+    (IChatClient client, string model) = ModelFactory.CreateCandidate();
+    KeywordRetriever retriever = KeywordRetriever.FromDirectory(RepoPaths.Corpus);
+    (AIAgent agent, GuardrailRecorder recorder) = SupportAgentFactory.Create(client, retriever);
+
+    return (agent, new RecorderTelemetrySource(recorder), model);
+}
+
+static string Save<T>(string fileName, T payload)
+{
+    Directory.CreateDirectory(RepoPaths.RunsDirectory);
+    string path = Path.Combine(RepoPaths.RunsDirectory, fileName);
+    File.WriteAllText(path, JsonSerializer.Serialize(payload, JsonDefaults.Options));
+
+    return path;
+}
+
+static EvalConfig LoadConfig()
 {
     using FileStream stream = File.OpenRead(RepoPaths.Config);
-    EvalConfig config = JsonSerializer.Deserialize<EvalConfig>(stream, JsonDefaults.Options)
-        ?? throw new InvalidOperationException("eval-config.json is not valid.");
 
-    return repetitionOverride is int repetitions
-        ? config with { Repetitions = repetitions }
-        : config;
+    return JsonSerializer.Deserialize<EvalConfig>(stream, JsonDefaults.Options)
+        ?? throw new InvalidOperationException("eval-config.json is not valid.");
 }
 
 static int Help()
@@ -172,14 +243,16 @@ static int Help()
     Console.WriteLine("""
         evalrunner <command>
 
-          tier1                          Deterministic checks over frozen responses (offline)
-          tier2 [--repetitions N]        Run the agent over the golden set and apply statistical gates
-          tier3 [--run PATH]             Judge a Tier 2 artifact with a model
-                [--sample-per-case N] [--min-mean X] [--min-score X]
-          report [--run PATH]            Print the Markdown report for a Tier 2 artifact
+          rules                          Rule engine over frozen responses (offline, no credentials)
+          tier2 [--repetitions N]        Pull-request gate: rules, retrieval, and the RAG triad
+                [--no-triad]             Skip judge calls and gate on deterministic checks only
+          tier3 [--repetitions N]        Scheduled reliability run with confidence intervals
+          tier3 --incident PATH [--judge] Replay a captured production trace against today's rules
+          report [--run PATH]            Print the report for a saved run artifact
 
         Exit codes: 0 pass, 1 gate failure, 2 configuration error.
         """);
 
     return 0;
 }
+

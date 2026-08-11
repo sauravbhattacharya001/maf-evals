@@ -1,9 +1,12 @@
 using System.Text.Json.Serialization;
-using EvalFramework.Deterministic;
+using EvalFramework.Retrieval;
+using EvalFramework.Rules;
 
 namespace EvalFramework.Execution;
 
-/// <summary>One agent invocation, retained so Tier 3 never has to rerun the agent.</summary>
+/// <summary>
+/// One agent invocation, retained so the triad and Tier 3 never have to rerun the agent.
+/// </summary>
 public sealed record ResponseRecord
 {
     [JsonPropertyName("caseId")]
@@ -21,8 +24,24 @@ public sealed record ResponseRecord
     [JsonPropertyName("latencyMs")]
     public required double LatencyMs { get; init; }
 
-    [JsonPropertyName("deterministic")]
-    public required DeterministicResult Deterministic { get; init; }
+    [JsonPropertyName("rules")]
+    public required RuleReport Rules { get; init; }
+
+    /// <summary>Context the agent actually saw. Required for the RAG triad.</summary>
+    [JsonPropertyName("retrieval")]
+    public RetrievalTrace? Retrieval { get; init; }
+
+    /// <summary>Tier 1 attempts spent on this response. Greater than one means a guard fired.</summary>
+    [JsonPropertyName("attempts")]
+    public int Attempts { get; init; } = 1;
+
+    /// <summary>Tool calls Tier 1 rejected before they ran.</summary>
+    [JsonPropertyName("rejectedToolCalls")]
+    public IReadOnlyList<string> RejectedToolCalls { get; init; } = [];
+
+    /// <summary>Set when Tier 1 blocked the response outright.</summary>
+    [JsonPropertyName("blocked")]
+    public bool Blocked { get; init; }
 }
 
 /// <summary>Per-case aggregate across repetitions.</summary>
@@ -60,16 +79,19 @@ public sealed record CaseStatistics
     public IReadOnlyList<string> TopFailures { get; init; } = [];
 }
 
-/// <summary>Versioned Tier 2 artifact. Input to Tier 3 and to reporting.</summary>
+/// <summary>Versioned run artifact. Input to the triad, to Tier 3, and to reporting.</summary>
 public sealed record RunArtifact
 {
-    public const string CurrentSchemaVersion = "tier2/v1";
+    public const string CurrentSchemaVersion = "run/v2";
 
     [JsonPropertyName("schemaVersion")]
     public string SchemaVersion { get; init; } = CurrentSchemaVersion;
 
     [JsonPropertyName("runId")]
     public required string RunId { get; init; }
+
+    [JsonPropertyName("tier")]
+    public required string Tier { get; init; }
 
     [JsonPropertyName("timestampUtc")]
     public required DateTimeOffset TimestampUtc { get; init; }

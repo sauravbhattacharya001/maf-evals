@@ -7,14 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       repetitions:
-        description: Repetitions per golden case for Tier 2
+        description: Repetitions per case for Tier 3
         default: "5"
   schedule:
     - cron: "0 6 * * 1"
 
 jobs:
-  # Tier 1 runs on every change. It needs no credentials, so it can never be skipped.
-  tier1:
+  # Offline: the rule engine, guardrail logic, retrieval, gates, and incident replay.
+  # No secrets, so this runs on every pull request including forks.
+  offline:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +23,43 @@ jobs:
         with:
           dotnet-version: "8.0.x"
       - run: dotnet test ThreeTierEvals.sln
-      - run: dotnet run --project src/EvalRunner -- tier1
+      - run: dotnet run --project src/EvalRunner -- rules
+      - run: dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
 
-  # Tiers 2 and 3 cost money and call a model, so they are manual or scheduled.
-  tier2-tier3:
+  # Tier 2 needs credentials to run the candidate agent at all, so fork pull requests
+  # cannot run it. They get an explicit skipped status rather than a false green.
+  tier2:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: evals
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Tier 2 gate
+        env:
+          EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
+          JUDGE_MODEL: ${{ vars.JUDGE_MODEL }}
+        run: dotnet run --project src/EvalRunner -- tier2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tier2-artifacts
+          path: artifacts/runs/
+
+  tier2-fork-notice:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Tier 2 was skipped: fork pull requests cannot access model credentials."
+          echo "A maintainer must run it from a branch in this repository before merging."
+
+  # Tier 3 is expensive and statistical, so it is scheduled rather than blocking.
+  tier3:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     environment: evals
@@ -34,25 +68,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-
-      - name: Tier 2 golden set
+      - name: Tier 3 reliability run
         env:
           EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
         run: >
-          dotnet run --project src/EvalRunner -- tier2
+          dotnet run --project src/EvalRunner -- tier3
           --repetitions ${{ github.event.inputs.repetitions || '5' }}
-
-      - name: Tier 3 judgement
-        env:
-          EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
-          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
-          JUDGE_MODEL: ${{ vars.JUDGE_MODEL }}
-        run: dotnet run --project src/EvalRunner -- tier3
-
-      - name: Upload run artifacts
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: eval-artifacts
+          name: tier3-artifacts
           path: artifacts/runs/
