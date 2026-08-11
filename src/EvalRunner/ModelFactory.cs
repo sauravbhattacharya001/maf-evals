@@ -19,7 +19,7 @@ public static class ModelFactory
     public static (IChatClient Client, string Model, UsageTracker Usage) CreateCandidate(bool cache = true)
     {
         string key = Required("EVAL_API_KEY", "OPENAI_API_KEY");
-        string model = Environment.GetEnvironmentVariable("EVAL_MODEL") ?? "gpt-4o-mini";
+        string model = Optional("EVAL_MODEL", "gpt-4o-mini");
         IChatClient client = Create(key, model, Environment.GetEnvironmentVariable("EVAL_ENDPOINT"));
         UsageTracker usage = new(model);
 
@@ -30,7 +30,7 @@ public static class ModelFactory
     {
         string key = Environment.GetEnvironmentVariable("JUDGE_API_KEY")
             ?? Required("EVAL_API_KEY", "OPENAI_API_KEY");
-        string model = Environment.GetEnvironmentVariable("JUDGE_MODEL") ?? "gpt-4o";
+        string model = Optional("JUDGE_MODEL", "gpt-4o");
         string? endpoint = Environment.GetEnvironmentVariable("JUDGE_ENDPOINT")
             ?? Environment.GetEnvironmentVariable("EVAL_ENDPOINT");
 
@@ -80,6 +80,11 @@ public static class ModelFactory
         throw new InvalidOperationException(
             $"Set one of {string.Join(" or ", names)} to run model-backed tiers.");
     }
-}
 
+    private static string Optional(string name, string defaultValue)
+    {
+        string? value = Environment.GetEnvironmentVariable(name);
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : value;
+    }
+}
 
