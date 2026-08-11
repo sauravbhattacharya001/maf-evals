@@ -10,11 +10,12 @@
   "minCriticalCasePassRate": 1.00,
   "minStandardCasePassRate": 0.60,
   "maxRegression": 0.05,
-  "baselineOverallPassRate": null,
+  "baselineOverallPassRate": 1.0,
   "callTimeoutSeconds": 120,
   "judgeConcurrency": 4,
   "maxMeanLatencyMs": null
 }
+
 
 
 

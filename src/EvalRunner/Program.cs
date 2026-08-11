@@ -83,7 +83,7 @@ static async Task<int> Tier2Async(CommandLine cli)
     EvalConfig config = LoadConfig();
     int repetitions = cli.IntOption("--repetitions") ?? config.Tier2Repetitions;
 
-    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent();
+    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent(repetitions);
 
     Console.WriteLine($"Tier 2: {cases.Count} cases x {repetitions} on {model}\n");
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
@@ -128,7 +128,7 @@ static async Task<int> Tier3Async(CommandLine cli)
     EvalConfig config = LoadConfig();
     int repetitions = cli.IntOption("--repetitions") ?? config.Tier3Repetitions;
 
-    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent();
+    (AIAgent agent, IRunTelemetrySource telemetry, string model) = BuildAgent(repetitions);
 
     Console.WriteLine($"Tier 3: {cases.Count} cases x {repetitions} on {model}\n");
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
@@ -295,9 +295,12 @@ static async Task<int> CalibrateAsync(CommandLine cli)
     return 0;
 }
 
-static (AIAgent Agent, IRunTelemetrySource Telemetry, string Model) BuildAgent()
+static (AIAgent Agent, IRunTelemetrySource Telemetry, string Model) BuildAgent(int repetitions = 1)
 {
-    (IChatClient client, string model) = ModelFactory.CreateCandidate();
+    // Repeated runs must bypass the cache, or every repetition replays one stored answer and the
+    // reliability figures describe the cache rather than the agent.
+    (IChatClient client, string model) = ModelFactory.CreateCandidate(
+        EvalPolicy.ShouldCacheCandidate(repetitions));
     KeywordRetriever retriever = KeywordRetriever.FromDirectory(RepoPaths.Corpus);
     (AIAgent agent, GuardrailRecorder recorder) = SupportAgentFactory.Create(client, retriever);
 
@@ -340,6 +343,8 @@ static int Help()
 
     return 0;
 }
+
+
 
 
 

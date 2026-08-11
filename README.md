@@ -86,6 +86,17 @@ always block, because they cannot flake.
 against a baseline. With 5 passes out of 5 the naive interval reads 100% to 100%; Wilson reads
 roughly 57% to 100%, which correctly says you have not yet earned a reliability claim.
 
+Repeated runs bypass the response cache. Caching is what makes a judge affordable on every pull
+request, but it is fatal here: identical prompts would return one stored answer, every repetition
+would agree, and the interval would be computed over copies of a single observation. That does not
+produce obviously broken output, it produces confident numbers that were never measured.
+
+First live run, 5 cases at 5 repetitions: 100% pass rate, overall 95% CI 86.7% to 100%, no flaky
+cases, and 5 of 5 textually distinct responses per case. The agent is nondeterministic in wording
+and reliable in behaviour, which is exactly the distinction this tier exists to separate. Note the
+per-case interval is 57% to 100% at n=5: five observations do not support a per-case reliability
+claim, only the pooled figure does.
+
 **Incident** (`tier3 --incident`): replays a captured production trace against today's rules. Fully
 offline. The outcomes are:
 
