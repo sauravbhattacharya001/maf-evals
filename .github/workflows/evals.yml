@@ -45,11 +45,13 @@ jobs:
       - name: Safety suite
         env:
           EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
         run: dotnet run --project src/EvalRunner -- safety
       - name: Tier 2 gate
         env:
           EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
           JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
           JUDGE_MODEL: ${{ vars.JUDGE_MODEL }}
