@@ -18,9 +18,9 @@ public static class ModelFactory
 {
     public static (IChatClient Client, string Model, UsageTracker Usage) CreateCandidate(bool cache = true)
     {
-        string key = Required("EVAL_API_KEY", "OPENAI_API_KEY");
-        string model = Optional("EVAL_MODEL", "gpt-4o-mini");
-        IChatClient client = Create(key, model, Environment.GetEnvironmentVariable("EVAL_ENDPOINT"));
+        string key = EnvironmentSettings.Required(Lookup, "EVAL_API_KEY", "OPENAI_API_KEY");
+        string model = EnvironmentSettings.Optional(Lookup, "gpt-4o-mini", "EVAL_MODEL");
+        IChatClient client = Create(key, model, EnvironmentSettings.OptionalOrNull(Lookup, "EVAL_ENDPOINT"));
         UsageTracker usage = new(model);
 
         return (Wrap(client, cache, usage), model, usage);
@@ -28,13 +28,9 @@ public static class ModelFactory
 
     public static (IChatClient Client, string Model, UsageTracker Usage) CreateJudge(bool cache = true)
     {
-        string? judgeKey = Environment.GetEnvironmentVariable("JUDGE_API_KEY");
-        string key = string.IsNullOrWhiteSpace(judgeKey)
-            ? Required("EVAL_API_KEY", "OPENAI_API_KEY")
-            : judgeKey;
-        string model = Optional("JUDGE_MODEL", "gpt-4o");
-        string? endpoint = Environment.GetEnvironmentVariable("JUDGE_ENDPOINT")
-            ?? Environment.GetEnvironmentVariable("EVAL_ENDPOINT");
+        string key = EnvironmentSettings.Required(Lookup, "JUDGE_API_KEY", "EVAL_API_KEY", "OPENAI_API_KEY");
+        string model = EnvironmentSettings.Optional(Lookup, "gpt-4o", "JUDGE_MODEL");
+        string? endpoint = EnvironmentSettings.OptionalOrNull(Lookup, "JUDGE_ENDPOINT", "EVAL_ENDPOINT");
 
         UsageTracker usage = new(model);
 
@@ -68,24 +64,6 @@ public static class ModelFactory
             .AsIChatClient();
     }
 
-    private static string Required(params string[] names)
-    {
-        foreach (string name in names)
-        {
-            string? value = Environment.GetEnvironmentVariable(name);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        throw new InvalidOperationException(
-            $"Set one of {string.Join(" or ", names)} to run model-backed tiers.");
-    }
-
-    private static string Optional(string name, string defaultValue)
-    {
-        string? value = Environment.GetEnvironmentVariable(name);
-        return string.IsNullOrWhiteSpace(value) ? defaultValue : value;
-    }
+    private static Func<string, string?> Lookup => EnvironmentSettings.SystemLookup;
 }
+
