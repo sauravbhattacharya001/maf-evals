@@ -25,15 +25,6 @@ public sealed record CostSummary
     [JsonPropertyName("estimatedCostUsd")]
     public double? EstimatedCostUsd { get; init; }
 
-    public static CostSummary Empty(string model) => new()
-    {
-        Model = model,
-        BilledCalls = 0,
-        InputTokens = 0,
-        OutputTokens = 0,
-        TotalTokens = 0,
-        EstimatedCostUsd = 0
-    };
 }
 
 /// <summary>
@@ -89,4 +80,5 @@ public sealed class UsageTracker(string model)
         }
     }
 }
+
 

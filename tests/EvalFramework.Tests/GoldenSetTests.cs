@@ -37,19 +37,19 @@ public sealed class GoldenSetTests
     }
 
     [Fact]
-    public void EveryFrozenResponseSatisfiesItsOwnCase()
+    public void EveryPositiveFixtureSatisfiesItsOwnCase()
     {
         string root = RepoRoot();
         IReadOnlyList<GoldenCase> cases = GoldenSet.Load(Path.Combine(root, "datasets", "support-golden-set.jsonl"));
-        RecordedResponseSet recorded = RecordedResponseSet.Load(
-            Path.Combine(root, "datasets", "tier1-recorded-responses.json"));
+        PositiveFixtureSet positives = PositiveFixtureSet.Load(
+            Path.Combine(root, "datasets", "positive-fixtures.json"));
 
-        Dictionary<string, string> lookup = recorded.Responses
+        Dictionary<string, string> lookup = positives.Fixtures
             .ToDictionary(item => item.CaseId, item => item.Response, StringComparer.OrdinalIgnoreCase);
 
         foreach (GoldenCase goldenCase in cases)
         {
-            Assert.True(lookup.ContainsKey(goldenCase.Id), $"No recorded response for {goldenCase.Id}.");
+            Assert.True(lookup.ContainsKey(goldenCase.Id), $"No positive fixture for {goldenCase.Id}.");
 
             RuleReport result = ResponseRules.Evaluate(goldenCase.ToRuleSet(), lookup[goldenCase.Id]);
 
@@ -79,4 +79,5 @@ public sealed class GoldenSetTests
         }
     }
 }
+
 

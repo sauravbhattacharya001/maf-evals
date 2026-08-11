@@ -23,8 +23,6 @@ public sealed class CommandLine(string[] args)
 
     public bool HasFlag(string name) => args.Skip(1).Contains(name, StringComparer.Ordinal);
 
-    public double DoubleOption(string name, double fallback) =>
-        double.TryParse(Option(name), out double value) ? value : fallback;
 }
 
 /// <summary>Locates repository assets regardless of the working directory.</summary>
@@ -34,7 +32,7 @@ public static class RepoPaths
 
     public static string GoldenSet => Path.Combine(Root, "datasets", "support-golden-set.jsonl");
 
-    public static string RecordedResponses => Path.Combine(Root, "datasets", "tier1-recorded-responses.json");
+    public static string PositiveFixtures => Path.Combine(Root, "datasets", "positive-fixtures.json");
 
     public static string Config => Path.Combine(Root, "config", "eval-config.json");
 
@@ -79,6 +77,8 @@ public static class RepoPaths
         return Directory.GetCurrentDirectory();
     }
 }
+
+
 
 
 

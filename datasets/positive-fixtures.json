@@ -1,6 +1,6 @@
 {
-  "description": "Frozen responses used by Tier 1. Editing these is how you test the evaluator itself, offline and without credentials.",
-  "responses": [
+  "description": "Known-good responses, one per golden case. Each MUST pass its case. Paired with negative-fixtures.json, which must fail: positives alone would stay green if every rule were deleted.",
+  "fixtures": [
     {
       "caseId": "order-not-arrived",
       "response": "Sorry about the delay. Here is how to resolve it:\n1. Check the tracking link in your confirmation email.\n2. If tracking has not updated in 7 days, contact support with your order number.\n3. We will open a carrier investigation and send a replacement if the parcel is lost."

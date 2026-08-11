@@ -39,24 +39,24 @@ catch (Exception error) when (error is InvalidOperationException or IOException 
     return 2;
 }
 
-// Offline check of the rule engine itself against frozen responses. Tier 1 proper runs
-// inside the agent at request time; this proves the rules it depends on still behave.
+// Offline check that the rules accept correct output. The negative fixtures, run by the test
+// suite, check the other half: that the same rules reject incorrect output.
 static int Rules()
 {
     IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
-    RecordedResponseSet recorded = RecordedResponseSet.Load(RepoPaths.RecordedResponses);
+    PositiveFixtureSet positives = PositiveFixtureSet.Load(RepoPaths.PositiveFixtures);
 
-    Dictionary<string, string> lookup = recorded.Responses
+    Dictionary<string, string> lookup = positives.Fixtures
         .ToDictionary(item => item.CaseId, item => item.Response, StringComparer.OrdinalIgnoreCase);
 
     int failures = 0;
-    Console.WriteLine($"Rule checks over {cases.Count} frozen responses\n");
+    Console.WriteLine($"Rule checks over {cases.Count} known-good responses\n");
 
     foreach (GoldenCase goldenCase in cases)
     {
         if (!lookup.TryGetValue(goldenCase.Id, out string? response))
         {
-            Console.WriteLine($"[FAIL] {goldenCase.Id}: no recorded response");
+            Console.WriteLine($"[FAIL] {goldenCase.Id}: no positive fixture");
             failures++;
             continue;
         }
@@ -433,6 +433,7 @@ static int Help()
 
     return 0;
 }
+
 
 
 

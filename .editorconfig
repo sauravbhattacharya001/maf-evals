@@ -1,0 +1,7 @@
+root = true
+
+[*.cs]
+# Unused usings are an error: they hide real coupling and accumulate silently.
+dotnet_diagnostic.IDE0005.severity = error
+# Prefer explicit, readable code over cleverness in a reference repository.
+dotnet_diagnostic.IDE0161.severity = suggestion
