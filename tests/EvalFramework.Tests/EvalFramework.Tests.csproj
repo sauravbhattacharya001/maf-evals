@@ -12,8 +12,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\EvalFramework\EvalFramework.csproj" />
+    <ProjectReference Include="..\..\src\EvalRunner\EvalRunner.csproj" />
     <ProjectReference Include="..\..\src\SupportAgent\SupportAgent.csproj" />
   </ItemGroup>
 </Project>
-
 
