@@ -88,7 +88,7 @@ static async Task<int> Tier2Async(CommandLine cli)
     Console.WriteLine($"Tier 2: {cases.Count} cases x {repetitions} on {model}\n");
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
 
-    RunArtifact run = await new AgentRunner(agent, model, telemetry)
+    RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds))
         .RunAsync(cases, repetitions, tier: "tier2", RepoPaths.GoldenSet, progress);
 
     List<TriadResult> triad = [];
@@ -99,12 +99,11 @@ static async Task<int> Tier2Async(CommandLine cli)
         (IChatClient judgeClient, string judgeModel) = ModelFactory.CreateJudge();
         Console.WriteLine($"\nJudging with {judgeModel}");
 
-        TriadEvaluator evaluator = new(judgeClient, config.Triad);
+        TriadEvaluator evaluator = new(
+            judgeClient, config.Triad, TimeSpan.FromSeconds(config.CallTimeoutSeconds));
 
-        foreach (ResponseRecord record in run.Responses.Where(record => !record.Blocked))
-        {
-            triad.Add(await evaluator.EvaluateAsync(record, progress));
-        }
+        ResponseRecord[] judgeable = run.Responses.Where(record => record.Counts && !record.Blocked).ToArray();
+        triad.AddRange(await evaluator.EvaluateManyAsync(judgeable, config.JudgeConcurrency, progress));
     }
 
     Tier2Result result = Tier2Gate.Apply(run, cases, triad, config.Triad, triadEvaluated);
@@ -134,7 +133,7 @@ static async Task<int> Tier3Async(CommandLine cli)
     Console.WriteLine($"Tier 3: {cases.Count} cases x {repetitions} on {model}\n");
     Progress<string> progress = new(line => Console.WriteLine($"  {line}"));
 
-    RunArtifact run = await new AgentRunner(agent, model, telemetry)
+    RunArtifact run = await new AgentRunner(agent, model, telemetry, TimeSpan.FromSeconds(config.CallTimeoutSeconds))
         .RunAsync(cases, repetitions, tier: "tier3", RepoPaths.GoldenSet, progress);
 
     GateReport gates = RunAnalyzer.ApplyGates(run, config);
@@ -341,6 +340,7 @@ static int Help()
 
     return 0;
 }
+
 
 
 

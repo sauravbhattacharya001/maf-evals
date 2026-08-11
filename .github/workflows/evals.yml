@@ -22,7 +22,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-      - run: dotnet test ThreeTierEvals.sln
+      - run: dotnet test ThreeTierEvals.sln --collect:"XPlat Code Coverage"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: "**/coverage.cobertura.xml"
       - run: dotnet run --project src/EvalRunner -- rules
       - run: dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
 
@@ -80,3 +85,4 @@ jobs:
         with:
           name: tier3-artifacts
           path: artifacts/runs/
+

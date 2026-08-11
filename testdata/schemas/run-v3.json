@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "run/v3",
+  "runId": "20260101-000000-fixture",
+  "tier": "tier3",
+  "timestampUtc": "2026-01-01T00:00:00+00:00",
+  "model": "fixture-model",
+  "datasetPath": "datasets/support-golden-set.jsonl",
+  "repetitions": 2,
+  "erroredCount": 1,
+  "overallPassRate": 0.5,
+  "overallLowerBound": 0.09,
+  "overallUpperBound": 0.91,
+  "meanLatencyMs": 1234.5,
+  "cases": [
+    {
+      "caseId": "fixture-case",
+      "critical": true,
+      "trials": 2,
+      "passes": 1,
+      "passRate": 0.5,
+      "lowerBound": 0.09,
+      "upperBound": 0.91,
+      "flaky": true,
+      "meanLatencyMs": 1234.5,
+      "topFailures": ["min_length x1"]
+    }
+  ],
+  "responses": [
+    {
+      "caseId": "fixture-case",
+      "query": "a question",
+      "repetition": 1,
+      "response": "a sufficiently long and acceptable answer",
+      "latencyMs": 1000,
+      "rules": {
+        "checks": [
+          { "name": "min_length", "passed": true, "detail": "length 40, required 10", "severity": "Retry" }
+        ],
+        "passed": true
+      },
+      "retrieval": {
+        "query": "a question",
+        "chunks": [
+          { "id": "refunds#1", "title": "Duplicate charges", "text": "policy text", "score": 2.5 }
+        ]
+      },
+      "attempts": 2,
+      "rejectedToolCalls": ["issue_refund"],
+      "outcome": "Completed"
+    },
+    {
+      "caseId": "fixture-case",
+      "query": "a question",
+      "repetition": 2,
+      "response": "",
+      "latencyMs": 1469,
+      "rules": { "checks": [], "passed": true },
+      "attempts": 1,
+      "rejectedToolCalls": [],
+      "outcome": "Errored",
+      "error": "429 Too Many Requests"
+    }
+  ]
+}

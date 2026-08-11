@@ -31,10 +31,22 @@ public interface IRunTelemetrySource
 /// Executes golden cases against a live agent and records everything needed downstream.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Shared by Tier 2 and Tier 3. Tier 2 uses a single repetition because it gates a pull request;
 /// Tier 3 uses many because it is measuring reliability rather than blocking a merge.
+/// </para>
+/// <para>
+/// Deliberately sequential. Telemetry is captured through a per-agent recorder that is reset before
+/// each invocation, so concurrent runs would interleave one another's retrieval traces and retry
+/// counts. Parallelism here would corrupt the evidence to save wall-clock time; the judge, which is
+/// stateless, is parallelised instead.
+/// </para>
 /// </remarks>
-public sealed class AgentRunner(AIAgent agent, string model, IRunTelemetrySource? telemetry = null)
+public sealed class AgentRunner(
+    AIAgent agent,
+    string model,
+    IRunTelemetrySource? telemetry = null,
+    TimeSpan? perRunTimeout = null)
 {
     public async Task<RunArtifact> RunAsync(
         IReadOnlyList<GoldenCase> cases,
@@ -81,11 +93,29 @@ public sealed class AgentRunner(AIAgent agent, string model, IRunTelemetrySource
 
         try
         {
+            // A hung call would otherwise stall an entire scheduled run. The timeout is linked to
+            // the caller's token so cancellation still propagates, and a timeout is recorded as
+            // Errored rather than as an agent failure.
+            using CancellationTokenSource linked =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            if (perRunTimeout is TimeSpan timeout)
+            {
+                linked.CancelAfter(timeout);
+            }
+
             AgentResponse response = await agent
-                .RunAsync(goldenCase.Query, cancellationToken: cancellationToken)
+                .RunAsync(goldenCase.Query, cancellationToken: linked.Token)
                 .ConfigureAwait(false);
 
             text = response.Text ?? string.Empty;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            outcome = ResponseOutcome.Errored;
+            text = string.Empty;
+            error = $"timed out after {perRunTimeout?.TotalSeconds:F0}s";
+            progress?.Report($"{goldenCase.Id}: ERRORED (timeout)");
         }
         catch (Exception blocked) when (blocked is IRuleBlockedException)
         {

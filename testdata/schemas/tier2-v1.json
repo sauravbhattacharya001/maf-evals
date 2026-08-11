@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "tier2/v1",
+  "run": {
+    "schemaVersion": "run/v3",
+    "runId": "20260101-000000-fixture",
+    "tier": "tier2",
+    "timestampUtc": "2026-01-01T00:00:00+00:00",
+    "model": "fixture-model",
+    "datasetPath": "datasets/support-golden-set.jsonl",
+    "repetitions": 1,
+    "erroredCount": 0,
+    "overallPassRate": 1,
+    "overallLowerBound": 0.21,
+    "overallUpperBound": 1,
+    "meanLatencyMs": 900,
+    "cases": [
+      {
+        "caseId": "fixture-case",
+        "critical": false,
+        "trials": 1,
+        "passes": 1,
+        "passRate": 1,
+        "lowerBound": 0.21,
+        "upperBound": 1,
+        "flaky": false,
+        "meanLatencyMs": 900,
+        "topFailures": []
+      }
+    ],
+    "responses": [
+      {
+        "caseId": "fixture-case",
+        "query": "a question",
+        "repetition": 1,
+        "response": "an acceptable answer",
+        "latencyMs": 900,
+        "rules": { "checks": [], "passed": true },
+        "attempts": 1,
+        "rejectedToolCalls": [],
+        "outcome": "Completed"
+      }
+    ]
+  },
+  "triad": [
+    {
+      "caseId": "fixture-case",
+      "scores": [
+        { "metric": "Retrieval", "score": 2, "verdict": "Fail", "reason": "noisy context" },
+        { "metric": "Groundedness", "score": 5, "verdict": "Pass", "reason": "fully supported" },
+        { "metric": "Relevance", "score": null, "verdict": "NotScored", "reason": "judge call failed" }
+      ]
+    }
+  ],
+  "violations": [],
+  "warnings": ["fixture-case: Retrieval scored 2.0, below floor 3.0 (advisory)"],
+  "triadEvaluated": true,
+  "thresholds": {
+    "retrieval": { "floor": 3, "target": 4, "blocking": false },
+    "groundedness": { "floor": 3.5, "target": 4, "blocking": true },
+    "relevance": { "floor": 3, "target": 4, "blocking": true }
+  }
+}

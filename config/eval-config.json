@@ -11,7 +11,10 @@
   "minStandardCasePassRate": 0.60,
   "maxRegression": 0.05,
   "baselineOverallPassRate": null,
+  "callTimeoutSeconds": 120,
+  "judgeConcurrency": 4,
   "maxMeanLatencyMs": null
 }
+
 
 

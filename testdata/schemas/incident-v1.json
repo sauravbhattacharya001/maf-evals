@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "incident/v1",
+  "incidentId": "INC-FIXTURE",
+  "capturedUtc": "2026-01-01T00:00:00+00:00",
+  "relatedCaseId": "fixture-case",
+  "query": "a question from production",
+  "response": "an answer that shipped",
+  "retrieval": {
+    "query": "a question from production",
+    "chunks": [
+      { "id": "safety#2", "title": "Damaged or missing medication", "text": "policy text", "score": 1.9 }
+    ]
+  },
+  "toolCalls": [
+    { "name": "issue_refund", "arguments": { "orderId": "A-1", "amount": 1200, "reason": "goodwill" } }
+  ]
+}

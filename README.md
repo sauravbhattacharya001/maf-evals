@@ -95,7 +95,7 @@ offline. The outcomes are:
 ## Quick start
 
 ```powershell
-dotnet test                                     # 76 offline tests
+dotnet test                                     # 181 offline tests
 dotnet run --project src/EvalRunner -- rules    # rule engine over frozen responses
 dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
 ```
@@ -282,6 +282,35 @@ That single change raised band agreement from 50% to 75%.
 Re-run calibration after changing the judge model, the rubric, or any threshold. Numbers from
 different judges are not comparable.
 
+## How the framework checks itself
+
+An eval framework that cannot fail is indistinguishable from one that always returns "passed". These
+guards exist to keep that honest:
+
+| Guard | What it prevents |
+| --- | --- |
+| Negative fixtures | Rules that never fire. Each known-bad response must fail *via a named rule* |
+| Seeded defects | An unwired pipeline. Real agent, guardrails, retriever, runner, then assert the gate reacts |
+| Retrieval regressions | Paying a judge to discover a retrieval break the free suite could catch |
+| Wilson coverage simulation | Trusting a transcribed formula instead of the property it claims |
+| Golden-set health | Silent dataset decay: duplicates, unexercised corpus, cases with no content rule |
+| Schema fixtures | Artifacts becoming unreadable while still claiming a version |
+| Judge calibration | Thresholds set by taste rather than measurement |
+
+Mutation check: forcing every rule to pass breaks 31 of the tests. Line coverage is 86.6%, branch
+74.3%, collected on every pull request.
+
+### Concurrency boundary
+
+Judging is parallel with a bounded budget; running the agent is deliberately sequential. Telemetry
+is captured through a per-agent recorder reset before each invocation, so concurrent runs would
+interleave one another's retrieval traces and retry counts. That would corrupt the evidence to save
+wall-clock time. Judging reads a recorded response and writes nothing shared, so it parallelises
+safely and returns results in input order for stable artifacts.
+
+Agent and judge calls both have a timeout (`callTimeoutSeconds`, default 120). A timed-out call is
+recorded as `Errored`, never as an agent failure.
+
 ## Limitations
 
 - Tier 2 and scheduled Tier 3 need credentials and are not covered by the offline suite.
@@ -305,6 +334,7 @@ different judges are not comparable.
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
 - [Wilson score interval](https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval)
+
 
 
 

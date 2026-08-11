@@ -20,9 +20,54 @@ namespace EvalFramework.RagTriad;
 /// never re-invokes the candidate agent.
 /// </para>
 /// </remarks>
-public sealed class TriadEvaluator(IChatClient judgeClient, TriadThresholds? thresholds = null)
+public sealed class TriadEvaluator(
+    IChatClient judgeClient,
+    TriadThresholds? thresholds = null,
+    TimeSpan? perCallTimeout = null)
 {
     private readonly TriadThresholds _thresholds = thresholds ?? new TriadThresholds();
+
+    /// <summary>
+    /// Scores many records with bounded concurrency.
+    /// </summary>
+    /// <remarks>
+    /// Safe to parallelise because judging reads a recorded response and writes nothing shared,
+    /// unlike the agent runner whose telemetry is per-invocation state. Concurrency is bounded so a
+    /// large golden set does not trip provider rate limits, which would surface as errored records
+    /// rather than as useful signal. Results are returned in input order for stable artifacts.
+    /// </remarks>
+    public async Task<IReadOnlyList<TriadResult>> EvaluateManyAsync(
+        IReadOnlyList<ResponseRecord> records,
+        int maxConcurrency = 4,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+
+        if (maxConcurrency < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrency), "maxConcurrency must be at least 1.");
+        }
+
+        TriadResult[] results = new TriadResult[records.Count];
+        using SemaphoreSlim gate = new(maxConcurrency);
+
+        await Task.WhenAll(records.Select(async (record, index) =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                results[index] = await EvaluateAsync(record, progress, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(false);
+
+        return results;
+    }
 
     public async Task<TriadResult> EvaluateAsync(
         ResponseRecord record,
@@ -82,9 +127,25 @@ public sealed class TriadEvaluator(IChatClient judgeClient, TriadThresholds? thr
 
         try
         {
+            using CancellationTokenSource linked =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            if (perCallTimeout is TimeSpan timeout)
+            {
+                linked.CancelAfter(timeout);
+            }
+
             result = await evaluator
-                .EvaluateAsync(messages, response, configuration, context, cancellationToken)
+                .EvaluateAsync(messages, response, configuration, context, linked.Token)
                 .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return [new TriadScore(
+                MetricNameFor(evaluator),
+                null,
+                TriadVerdict.NotScored,
+                $"judge call timed out after {perCallTimeout?.TotalSeconds:F0}s")];
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {

@@ -41,6 +41,15 @@ public sealed record EvalConfig
     [JsonPropertyName("maxErrorRate")]
     public double MaxErrorRate { get; init; }
 
+    /// <summary>Seconds before a single agent or judge call is abandoned as errored.</summary>
+    [JsonPropertyName("callTimeoutSeconds")]
+    public int CallTimeoutSeconds { get; init; } = 120;
+
+    /// <summary>Concurrent judge calls. Bounded to stay inside provider rate limits.</summary>
+    [JsonPropertyName("judgeConcurrency")]
+    public int JudgeConcurrency { get; init; } = 4;
+
     [JsonPropertyName("maxMeanLatencyMs")]
     public double? MaxMeanLatencyMs { get; init; }
 }
+
