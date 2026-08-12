@@ -82,7 +82,7 @@ Tier 1 ships with the agent rather than with the tests. It runs on live traffic,
 stop a bad answer or a bad action before anyone sees it.
 
 **Layer A validates tool arguments before the tool runs.** If something is wrong it doesn't call the
-tool at all ΓÇö it returns an explanation as the tool result, which the model reads on its next loop
+tool at all - it returns an explanation as the tool result, which the model reads on its next loop
 iteration and corrects from. That costs nothing extra, since the loop was going to iterate anyway,
 and it prevents side effects that no later retry could undo.
 
@@ -124,11 +124,11 @@ across the whole golden set is still a regression.
 
 Tier 2 runs each case once and applies five checks, cheapest first.
 
-1. **Rules** ΓÇö the same engine Tier 1 uses, so a rule can't drift between production and CI.
-2. **Retrieval** ΓÇö did the expected documents come back? Exact, free, no judge involved.
-3. **Tool calls** ΓÇö did the agent reach for the right tool with the right values?
-4. **Meaning** ΓÇö is the sense right, in cases where the wording is free to vary?
-5. **RAG triad** ΓÇö a judge scores retrieval, groundedness, and answer relevance.
+1. **Rules** - the same engine Tier 1 uses, so a rule can't drift between production and CI.
+2. **Retrieval** - did the expected documents come back? Exact, free, no judge involved.
+3. **Tool calls** - did the agent reach for the right tool with the right values?
+4. **Meaning** - is the sense right, in cases where the wording is free to vary?
+5. **RAG triad** - a judge scores retrieval, groundedness, and answer relevance.
 
 Each triad score isolates a different failure. Retrieval catches a bad knowledge base or a bad query,
 groundedness catches claims the context doesn't support, and relevance catches well-grounded answers
@@ -153,7 +153,7 @@ both cost and reliability.
 
 A keyword list is a poor proxy for meaning. Asked to decline an over-limit refund, the agent said
 "without escalation", then "up to 500 units", then "without additional approval". Each fix added the
-missing synonym, and the next run found another ΓÇö while the behaviour was correct every single time.
+missing synonym, and the next run found another - while the behaviour was correct every single time.
 
 ```json
 "semanticExpectations": [{
@@ -171,7 +171,7 @@ This runs in Tier 2 only, since Tier 1 must never touch the network.
 
 Judge scores move between runs, so a single cut-off turns anything near it into a coin flip. Each one
 therefore has a floor that blocks and a target that warns. The deterministic checks have no such band
-ΓÇö they always block, because they don't wobble.
+- they always block, because they don't wobble.
 
 ## Tier 3: judging the trajectory
 
@@ -206,7 +206,7 @@ the agent a second time.
 
 Task Adherence found something no pass/fail check could see: again and again, the agent was marked
 down for describing a tool action instead of actually calling the tool. The two ranges differ, so the
-report always prints the range alongside the score ΓÇö otherwise 0.75 reads like a poor mark out of 5
+report always prints the range alongside the score - otherwise 0.75 reads like a poor mark out of 5
 rather than three correct calls in four.
 
 ## Judge calibration
@@ -254,7 +254,7 @@ different judges aren't comparable.
 
 The `safety` command runs a red team set against a knowledge base that has an attack planted in it,
 because prompt injection reaches a RAG agent through retrieved content rather than through the user's
-message. Rules alone decide the outcome ΓÇö a refusal is a fact about the text, and a successful
+message. Rules alone decide the outcome - a refusal is a fact about the text, and a successful
 jailbreak is plainly visible in what the agent said and did.
 
 | Attack | What it probes |
@@ -280,7 +280,7 @@ this environment doesn't have, and shipping code nobody has run would undercut t
 
 ## Incident replay
 
-Not a tier ΓÇö a diagnostic you reach for after something goes wrong in production. It replays one
+Not a tier - a diagnostic you reach for after something goes wrong in production. It replays one
 captured trace against today's rules, and stays offline unless you pass `--judge`.
 
 There are two useful outcomes. Either the rules catch it, which means the guard now covers what
@@ -379,7 +379,7 @@ rather than a code change.
 | `EVAL_ENDPOINT`, `JUDGE_ENDPOINT` | Optional OpenAI-compatible endpoints |
 
 Blank counts as absent everywhere. GitHub Actions passes an undefined secret as an empty string, so
-`??` happily keeps the empty value ΓÇö a mistake that broke CI three times before it was fixed in one
+`??` happily keeps the empty value - a mistake that broke CI three times before it was fixed in one
 place.
 
 ## CI
@@ -424,14 +424,14 @@ defects in the evaluation itself.
 | The agent paid 500 against a 4000 request | Per-call validation is blind to structuring |
 | Tool Call Accuracy silently scored null | It returns a boolean; the judge was fine, my unwrapping wasn't |
 | Task Adherence flagged half the golden set | The agent narrates tool use instead of calling tools |
-| A concurrency test compared wall-clock times | The suite made itself flaky ΓÇö the very thing it warns about |
+| A concurrency test compared wall-clock times | The suite made itself flaky - the very thing it warns about |
 
 ## Limitations
 
 - Tier 2, Tier 3, and the safety suite all need credentials, so the offline suite doesn't cover them.
 - Groundedness agrees with human labels 75% of the time at band level, and relevance 83%. Both gate
   today, so treat their scores as coarse signals rather than precise measurements.
-- The calibration set is 12 cases labelled by one person ΓÇö enough to expose systematic judge
+- The calibration set is 12 cases labelled by one person - enough to expose systematic judge
   behaviour, nowhere near enough to tune thresholds finely.
 - Semantic thresholds were set by inspection rather than calibrated against labelled data.
 - Retrieval is TF-IDF, chosen for reproducibility. Two golden cases rank a weaker document first
