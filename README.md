@@ -184,9 +184,9 @@ every run stores the full trajectory: each turn, each tool call, and each tool r
 
 | Score | Range | Question |
 | --- | --- | --- |
-| Intent Resolution | 1ΓÇô5 | Did it work out what the customer actually wanted? |
-| Task Adherence | 1ΓÇô5 | Did it follow its instructions and use the tools it was given? |
-| Tool Call Accuracy | 0ΓÇô1 | Were the calls relevant and correctly parameterised? |
+| Intent Resolution | 1-5 | Did it work out what the customer actually wanted? |
+| Task Adherence | 1-5 | Did it follow its instructions and use the tools it was given? |
+| Tool Call Accuracy | 0-1 | Were the calls relevant and correctly parameterised? |
 
 ```powershell
 dotnet run --project src/EvalRunner -- tier3              # run the cases, then judge them
