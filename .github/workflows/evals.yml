@@ -9,8 +9,8 @@ on:
     - cron: "0 6 * * 1"
 
 jobs:
-  # Offline: the rule engine, guardrail logic, retrieval, gates, and incident replay.
-  # No secrets, so this runs on every pull request including forks.
+  # Offline: rules, guardrail logic, retrieval, gates, and incident replay.
+  # No secrets, so this runs on every pull request including those from forks.
   offline:
     runs-on: ubuntu-latest
     steps:
@@ -25,10 +25,10 @@ jobs:
           name: coverage
           path: "**/coverage.cobertura.xml"
       - run: dotnet run --project src/EvalRunner -- rules
-      - run: dotnet run --project src/EvalRunner -- tier3 --incident incidents/sample-incident.json
+      - run: dotnet run --project src/EvalRunner -- incident --trace incidents/sample-incident.json
 
-  # Tier 2 needs credentials to run the candidate agent at all, so fork pull requests
-  # cannot run it. They get an explicit skipped status rather than a false green.
+  # Tier 2 needs credentials just to generate the answers, so pull requests from forks
+  # cannot run it. They get an explicit skipped status rather than a false green tick.
   tier2:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
@@ -51,6 +51,8 @@ jobs:
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
           JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
           JUDGE_MODEL: ${{ vars.JUDGE_MODEL }}
+          # Semantic expectations use embeddings, billed against the same key.
+          EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
         run: dotnet run --project src/EvalRunner -- tier2
       - uses: actions/upload-artifact@v4
         if: always()
@@ -66,8 +68,8 @@ jobs:
           echo "Tier 2 was skipped: fork pull requests cannot access model credentials."
           echo "A maintainer must run it from a branch in this repository before merging."
 
-  # Tier 3 judges the reasoning trajectory. Scheduled rather than blocking because a judge measured
-  # flipping verdicts on identical input reports a trend, not a verdict.
+  # Tier 3 judges the reasoning trajectory. Scheduled rather than blocking, because a judge
+  # measured flipping verdicts on identical input reports a trend, not a verdict.
   tier3:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -79,17 +81,15 @@ jobs:
           dotnet-version: "8.0.x"
       - name: Tier 3 trajectory judging
         env:
+          # The agent runs the cases; the judge scores the trajectories. Both are needed.
           EVAL_API_KEY: ${{ secrets.EVAL_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
+          JUDGE_MODEL: ${{ vars.JUDGE_MODEL }}
         run: dotnet run --project src/EvalRunner -- tier3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: tier3-artifacts
           path: artifacts/runs/
-
-
-
-
-

@@ -3,7 +3,52 @@ namespace EvalRunner;
 /// <summary>Minimal argument parsing. A CLI dependency is not worth the weight here.</summary>
 public sealed class CommandLine(string[] args)
 {
+    /// <summary>Options and flags each command accepts. Anything else is a mistake.</summary>
+    private static readonly Dictionary<string, string[]> Allowed = new(StringComparer.Ordinal)
+    {
+        ["rules"] = [],
+        ["tier2"] = ["--no-triad"],
+        ["tier3"] = ["--run"],
+        ["safety"] = [],
+        ["calibrate"] = ["--repeat", "--case"],
+        ["incident"] = ["--trace", "--judge"],
+        ["retrieve"] = ["--query", "--top"],
+        ["report"] = ["--run"],
+        ["help"] = []
+    };
+
     public string Command { get; } = args.Length == 0 ? "help" : args[0];
+
+    /// <summary>
+    /// Rejects options the command does not know.
+    /// </summary>
+    /// <remarks>
+    /// Silently ignoring an unknown option is how a renamed flag goes unnoticed. When incident
+    /// replay moved out of Tier 3, CI still passed <c>tier3 --incident PATH</c>. The flag was
+    /// dropped without complaint and a full Tier 3 run started against the live model instead.
+    /// An unrecognised option now stops the command.
+    /// </remarks>
+    public void Validate()
+    {
+        if (!Allowed.TryGetValue(Command, out string[]? allowed))
+        {
+            return;
+        }
+
+        string[] unknown = args.Skip(1)
+            .Where(token => token.StartsWith("--", StringComparison.Ordinal))
+            .Where(token => !allowed.Contains(token, StringComparer.Ordinal))
+            .ToArray();
+
+        if (unknown.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"'{Command}' does not accept {string.Join(", ", unknown)}. "
+                + (allowed.Length == 0
+                    ? "It takes no options."
+                    : $"It accepts {string.Join(", ", allowed)}."));
+        }
+    }
 
     public string? Option(string name)
     {

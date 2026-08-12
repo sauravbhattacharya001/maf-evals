@@ -21,6 +21,8 @@ DotEnv.Load();
 
 try
 {
+    cli.Validate();
+
     return cli.Command switch
     {
         "rules" => Rules(),
@@ -525,6 +527,7 @@ static int Help()
 
     return 0;
 }
+
 
 
 
