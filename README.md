@@ -403,44 +403,9 @@ a negative fixture proving it fires. Both tiers pick it up automatically.
 **After an incident:** drop the trace into `incidents/`, run the replay, and add a golden case if
 nothing catches it.
 
-## What went wrong, and what it taught
-
-Every one of these was found by running the evaluation, not by reading the code. Six of them were
-defects in the evaluation itself.
-
-| Finding | Lesson |
-| --- | --- |
-| API errors counted as agent failures | Missing data must never turn into a measurement |
-| Rules had no negative fixtures | The suite was green but couldn't fail |
-| Retrieval scored `5, 2, 4, 5, 2` on one input | A stable average hid a 17% verdict flip rate |
-| Groundedness scored fabrication at exactly 3.0 | A floor of 3.0 waved every hallucination through |
-| The cache made repeated runs identical | Caching and measuring variance are incompatible |
-| Tools registered as `LookupOrder`, rules guarded `lookup_order` | The guard did nothing in every real run |
-| Telemetry handed out its live list | A later reset wiped evidence already captured |
-| The tokeniser had no stemming | `refund` never matched `refunds`, hiding a whole policy |
-| Injection through the knowledge base worked | The tool guard stopped the payout anyway |
-| Hardening against injection suppressed tool use | Two evaluations in tension, and you need both |
-| A word list failed three times on correct refusals | Repeated synonym patching means you're testing phrasing |
-| The agent paid 500 against a 4000 request | Per-call validation is blind to structuring |
-| Tool Call Accuracy silently scored null | It returns a boolean; the judge was fine, my unwrapping wasn't |
-| Task Adherence flagged half the golden set | The agent narrates tool use instead of calling tools |
-| A concurrency test compared wall-clock times | The suite made itself flaky - the very thing it warns about |
-
-## Limitations
-
-- Tier 2, Tier 3, and the safety suite all need credentials, so the offline suite doesn't cover them.
-- Groundedness agrees with human labels 75% of the time at band level, and relevance 83%. Both gate
-  today, so treat their scores as coarse signals rather than precise measurements.
-- The calibration set is 12 cases labelled by one person - enough to expose systematic judge
-  behaviour, nowhere near enough to tune thresholds finely.
-- Semantic thresholds were set by inspection rather than calibrated against labelled data.
-- Retrieval is TF-IDF, chosen for reproducibility. Two golden cases rank a weaker document first
-  because a keyword's sense depends on context, and that's where embeddings would earn their cost.
-- The CLI is barely unit tested; running the commands is what exercises it.
-- Every case is single turn. Multi-turn evaluation, and the session behaviour of Tier 1 retries, are
-  not covered at all.
 
 ## References
 
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
+
