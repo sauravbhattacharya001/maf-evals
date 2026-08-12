@@ -13,10 +13,14 @@ public sealed class RecorderTelemetrySource(GuardrailRecorder recorder) : IRunTe
 
     public RunTelemetry Capture()
     {
-        RetrievalTrace? retrieval = recorder.LastRetrieval;
+        // A conversation searches once per turn; the expectation applies to the whole conversation.
+        RetrievalTrace? retrieval = recorder.Retrievals.Count == 0
+            ? null
+            : RetrievalTrace.Merge(recorder.Retrievals);
         int attempts = recorder.LastResponse?.Attempts ?? 1;
         return new RunTelemetry(retrieval, attempts, recorder.ToolCalls);
     }
 }
+
 
 

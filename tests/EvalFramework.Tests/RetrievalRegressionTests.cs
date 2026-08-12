@@ -50,7 +50,11 @@ public sealed class RetrievalRegressionTests
     public void ExpectedChunksAreRetrievedForEveryGoldenCase(string caseId)
     {
         GoldenCase goldenCase = Cases().Single(item => item.Id == caseId);
-        RetrievalTrace trace = Retriever().Retrieve(goldenCase.Query);
+        KeywordRetriever retriever = Retriever();
+
+        // A conversation searches once per turn, so the expectation holds if any turn finds it.
+        RetrievalTrace trace = RetrievalTrace.Merge(
+            goldenCase.EffectiveTurns.Select(turn => retriever.Retrieve(turn)).ToArray());
 
         string[] retrieved = trace.Chunks.Select(chunk => chunk.Id).ToArray();
         string[] missing = goldenCase.ExpectedChunkIds.Where(id => !retrieved.Contains(id)).ToArray();
@@ -170,5 +174,6 @@ public sealed class RetrievalRegressionTests
             $"Only {topRanked}/{cases.Length} cases rank an expected chunk first, down from {measured}.");
     }
 }
+
 
 

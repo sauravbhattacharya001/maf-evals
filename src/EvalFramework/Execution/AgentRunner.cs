@@ -108,12 +108,31 @@ public sealed class AgentRunner(
                 linked.CancelAfter(timeout);
             }
 
-            AgentResponse response = await agent
-                .RunAsync(goldenCase.Query, cancellationToken: linked.Token)
-                .ConfigureAwait(false);
+            IReadOnlyList<string> turns = goldenCase.EffectiveTurns;
+
+            // A conversation needs a session, so the agent carries context between turns. A single
+            // turn deliberately runs without one, which keeps the common case stateless.
+            AgentSession? session = goldenCase.IsMultiTurn
+                ? await agent.CreateSessionAsync(linked.Token).ConfigureAwait(false)
+                : null;
+
+            List<TrajectoryMessage> collected = [];
+            AgentResponse response = null!;
+
+            foreach (string turn in turns)
+            {
+                response = await agent
+                    .RunAsync(turn, session, cancellationToken: linked.Token)
+                    .ConfigureAwait(false);
+
+                // The trajectory spans the whole conversation. The customer turn is recorded too,
+                // or a reader cannot tell which answer replied to which question.
+                collected.Add(new TrajectoryMessage { Role = "user", Text = turn });
+                collected.AddRange(Trajectory.Capture(response.Messages));
+            }
 
             text = response.Text ?? string.Empty;
-            trajectory = Trajectory.Capture(response.Messages);
+            trajectory = collected;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -206,6 +225,7 @@ public sealed class AgentRunner(
         };
     }
 }
+
 
 
 

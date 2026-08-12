@@ -15,6 +15,25 @@ public sealed class GoldenCase
     [JsonPropertyName("query")]
     public required string Query { get; init; }
 
+    /// <summary>
+    /// The customer turns, for a conversation that takes more than one message.
+    /// </summary>
+    /// <remarks>
+    /// A single question rarely resembles real support traffic. Faults that only appear later in a
+    /// conversation are invisible to a one-shot case: the agent forgets an order number it was
+    /// already given, contradicts an earlier answer, or repeats a question the customer answered.
+    /// When this list is empty the case is a single turn built from <see cref="Query"/>.
+    /// </remarks>
+    [JsonPropertyName("turns")]
+    public IReadOnlyList<string> Turns { get; init; } = [];
+
+    /// <summary>The turns to send, whether the case declares one or several.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> EffectiveTurns => Turns.Count > 0 ? Turns : [Query];
+
+    [JsonIgnore]
+    public bool IsMultiTurn => Turns.Count > 1;
+
     /// <summary>What this case is probing, for adversarial sets. Documentation, not a rule.</summary>
     [JsonPropertyName("attack")]
     public string? Attack { get; init; }
@@ -88,6 +107,7 @@ public sealed class GoldenCase
         Severities = Severities
     };
 }
+
 
 
 

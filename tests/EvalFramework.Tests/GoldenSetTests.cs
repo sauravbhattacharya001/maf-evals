@@ -44,18 +44,23 @@ public sealed class GoldenSetTests
         PositiveFixtureSet positives = PositiveFixtureSet.Load(
             Path.Combine(root, "datasets", "positive-fixtures.json"));
 
-        Dictionary<string, string> lookup = positives.Fixtures
-            .ToDictionary(item => item.CaseId, item => item.Response, StringComparer.OrdinalIgnoreCase);
+        ILookup<string, string> lookup = positives.Fixtures
+            .ToLookup(item => item.CaseId, item => item.Response, StringComparer.OrdinalIgnoreCase);
 
         foreach (GoldenCase goldenCase in cases)
         {
-            Assert.True(lookup.ContainsKey(goldenCase.Id), $"No positive fixture for {goldenCase.Id}.");
+            string[] responses = lookup[goldenCase.Id].ToArray();
 
-            RuleReport result = ResponseRules.Evaluate(goldenCase.ToRuleSet(), lookup[goldenCase.Id]);
+            Assert.True(responses.Length > 0, $"No positive fixture for {goldenCase.Id}.");
 
-            Assert.True(
-                result.Passed,
-                $"{goldenCase.Id} failed: {string.Join(", ", result.Failures.Select(failure => failure.Name))}");
+            foreach (string response in responses)
+            {
+                RuleReport result = ResponseRules.Evaluate(goldenCase.ToRuleSet(), response);
+
+                Assert.True(
+                    result.Passed,
+                    $"{goldenCase.Id} failed: {string.Join(", ", result.Failures.Select(failure => failure.Name))}");
+            }
         }
     }
 
@@ -79,5 +84,6 @@ public sealed class GoldenSetTests
         }
     }
 }
+
 
 

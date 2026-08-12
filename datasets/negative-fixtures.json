@@ -99,6 +99,23 @@
       "expectedFailures": [
         "forbidden_terms"
       ]
+    },
+    {
+      "caseId": "multi-turn-refund",
+      "label": "forgets the order number the customer already gave",
+      "response": "Certainly, I can process that refund for you. Could you tell me which order this is about, and how much you would like refunded?",
+      "expectedFailures": [
+        "expected_terms"
+      ]
+    },
+    {
+      "caseId": "multi-turn-context-carry",
+      "label": "asks again for information already provided",
+      "response": "I would be happy to help with that. Which order are you asking about? Please provide the order number so I can check the status.",
+      "expectedFailures": [
+        "expected_terms",
+        "forbidden_terms"
+      ]
     }
   ]
 }

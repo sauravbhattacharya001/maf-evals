@@ -28,6 +28,33 @@ public sealed class SemanticRuleEvaluator(IEmbeddingGenerator<string, Embedding<
         return new RuleReport(checks);
     }
 
+    /// <summary>
+    /// Highest similarity between a response and any reference for an expectation.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so a threshold can be chosen from labelled examples instead of by inspection. A
+    /// number picked by eye rejected a correct refusal at 0.49 against a guessed 0.55.
+    /// </remarks>
+    public async Task<double> BestSimilarityAsync(
+        SemanticExpectation expectation,
+        string response,
+        CancellationToken cancellationToken = default)
+    {
+        string[] inputs = [response ?? string.Empty, .. expectation.AnyOf];
+
+        GeneratedEmbeddings<Embedding<float>> generated =
+            await embeddings.GenerateAsync(inputs, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        double best = 0;
+
+        for (int i = 1; i < generated.Count; i++)
+        {
+            best = Math.Max(best, CosineSimilarity(generated[0].Vector.Span, generated[i].Vector.Span));
+        }
+
+        return best;
+    }
+
     private async Task<CheckResult> EvaluateOneAsync(
         SemanticExpectation expectation,
         string response,
@@ -100,3 +127,4 @@ public sealed class SemanticRuleEvaluator(IEmbeddingGenerator<string, Embedding<
         return denominator == 0 ? 0 : dot / denominator;
     }
 }
+

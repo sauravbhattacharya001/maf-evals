@@ -13,7 +13,12 @@ public sealed class GuardrailRecorder
 {
     private readonly List<ToolCallRecord> _toolCalls = [];
 
-    public RetrievalTrace? LastRetrieval { get; private set; }
+    private readonly List<RetrievalTrace> _retrievals = [];
+
+    /// <summary>Every search this request made, one for each turn of the conversation.</summary>
+    public IReadOnlyList<RetrievalTrace> Retrievals => _retrievals.ToArray();
+
+    public RetrievalTrace? LastRetrieval => _retrievals.Count == 0 ? null : _retrievals[^1];
 
     public GuardrailOutcome? LastResponse { get; private set; }
 
@@ -29,12 +34,12 @@ public sealed class GuardrailRecorder
 
     public void Reset()
     {
-        LastRetrieval = null;
+        _retrievals.Clear();
         LastResponse = null;
         _toolCalls.Clear();
     }
 
-    internal void RecordRetrieval(RetrievalTrace trace) => LastRetrieval = trace;
+    internal void RecordRetrieval(RetrievalTrace trace) => _retrievals.Add(trace);
 
     internal void RecordResponse(GuardrailOutcome outcome) => LastResponse = outcome;
 
@@ -108,6 +113,7 @@ public static class SupportAgentFactory
         return (agent, recorder);
     }
 }
+
 
 
 

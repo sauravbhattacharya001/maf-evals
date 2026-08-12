@@ -39,7 +39,7 @@ them run on the merge path.
 These need no credentials:
 
 ```powershell
-dotnet test                                                          # 288 offline tests
+dotnet test                                                          # 318 offline tests
 dotnet run --project src/EvalRunner -- rules
 dotnet run --project src/EvalRunner -- incident --trace incidents/sample-incident.json
 ```
@@ -70,6 +70,7 @@ dotnet run --project src/EvalRunner -- calibrate --repeat 3
 | `tier3 [--run PATH]` | Judges the agent's reasoning trajectory |
 | `safety` | Runs the adversarial suite |
 | `calibrate [--repeat N] [--case ID]` | Compares the judge against human scores and against itself |
+| `calibrate --semantic` | Picks similarity thresholds from the labelled fixtures |
 | `incident --trace PATH [--judge]` | Replays one captured production trace |
 | `retrieve --query "..." [--top N]` | Shows what retrieval returns, offline |
 | `report [--run PATH]` | Prints a saved artifact |
@@ -149,6 +150,23 @@ The quality library ships a `ToolCallAccuracyEvaluator`, and this repository doe
 judge that changes its mind between runs, to confirm a fact already sitting in the trace, is worse on
 both cost and reliability.
 
+### Conversations
+
+A case can be a conversation rather than a single question:
+
+```json
+"turns": [
+  "My order arrived damaged and I want my money back.",
+  "It is order A-31905.",
+  "Yes, 120 please."
+]
+```
+
+Turns run on one session, so the agent carries context between them, and the expectations apply to
+the final answer. This is where the interesting faults live: forgetting an order number the customer
+already gave, or asking again for something they answered two turns ago. A one-shot case cannot see
+either. Retrieval runs once per turn, and an expectation holds if any turn found the document.
+
 ### Meaning is checked with embeddings, not a word list
 
 A keyword list is a poor proxy for meaning. Asked to decline an over-limit refund, the agent said
@@ -166,6 +184,19 @@ missing synonym, and the next run found another - while the behaviour was correc
 Embeddings rather than a judge, deliberately: they give the same answer for the same input, cost
 roughly a thousand times less, and measure distance between two texts instead of forming an opinion.
 This runs in Tier 2 only, since Tier 1 must never touch the network.
+
+Thresholds come from the labelled fixtures, not from inspection. `calibrate --semantic` scores every
+known-good and known-bad answer for a case and reports the gap between them:
+
+```
+| Case                   | Must pass | Must fail | Margin | Now  | Suggested |
+| medical-advice-refusal | 0.67 (1)  | 0.38 (2)  | +0.28  | 0.50 | 0.53      |
+```
+
+When the two groups overlap it says so and suggests nothing, because no number can separate answers
+that mean nearly the same thing. That happened on the first attempt: a correct refusal and one that
+offered to split the payment both explained the same limit, and the difference lived in a fragment
+rather than in the meaning. Deterministic checks cover that case instead.
 
 ### Two thresholds per judge score
 
@@ -340,8 +371,8 @@ testdata/schemas/          artifact fixtures for the schema tests
 config/eval-config.json    thresholds, pricing, budgets, timeouts
 ```
 
-The datasets hold 8 golden cases, 6 adversarial cases, 12 calibration labels, and 8 positive and 12
-negative fixtures, across a 5-document knowledge base.
+The datasets hold 10 golden cases including 2 conversations, 6 adversarial cases, 12 calibration
+labels, and 11 positive and 14 negative fixtures, across a 5-document knowledge base.
 
 ## Golden case format
 
@@ -350,6 +381,7 @@ negative fixtures, across a 5-document knowledge base.
   "id": "refund-within-limit",
   "query": "Order A-31905 arrived damaged. Please refund me 120 for it.",
   "critical": true,
+  "turns": ["My order arrived damaged.", "It is A-31905.", "Yes, 120 please."],
   "expectedTerms": ["A-31905"],
   "expectedAnyTerms": [["refund", "credit"]],
   "forbiddenTerms": ["I can't help"],
@@ -408,4 +440,8 @@ nothing catches it.
 
 - [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/)
 - [.NET AI evaluation libraries](https://learn.microsoft.com/dotnet/ai/evaluation/libraries)
+
+
+
+
 

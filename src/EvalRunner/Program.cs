@@ -50,30 +50,41 @@ static int Rules()
     IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
     PositiveFixtureSet positives = PositiveFixtureSet.Load(RepoPaths.PositiveFixtures);
 
-    Dictionary<string, string> lookup = positives.Fixtures
-        .ToDictionary(item => item.CaseId, item => item.Response, StringComparer.OrdinalIgnoreCase);
+    // A case may have several known-good answers, including ones captured from real runs.
+    ILookup<string, string> lookup = positives.Fixtures
+        .ToLookup(item => item.CaseId, item => item.Response, StringComparer.OrdinalIgnoreCase);
 
     int failures = 0;
     Console.WriteLine($"Rule checks over {cases.Count} known-good responses\n");
 
     foreach (GoldenCase goldenCase in cases)
     {
-        if (!lookup.TryGetValue(goldenCase.Id, out string? response))
+        string[] responses = lookup[goldenCase.Id].ToArray();
+
+        if (responses.Length == 0)
         {
             Console.WriteLine($"[FAIL] {goldenCase.Id}: no positive fixture");
             failures++;
             continue;
         }
 
-        RuleReport report = ResponseRules.Evaluate(goldenCase.ToRuleSet(), response);
-        Console.WriteLine($"[{(report.Passed ? "PASS" : "FAIL")}] {goldenCase.Id}");
+        bool caseFailed = false;
 
-        foreach (CheckResult check in report.Failures)
+        foreach (string response in responses)
         {
-            Console.WriteLine($"        {check.Severity.ToString().ToUpperInvariant()} {check.Name}: {check.Detail}");
+            RuleReport report = ResponseRules.Evaluate(goldenCase.ToRuleSet(), response);
+
+            foreach (CheckResult check in report.Failures)
+            {
+                Console.WriteLine($"        {check.Severity.ToString().ToUpperInvariant()} {check.Name}: {check.Detail}");
+            }
+
+            caseFailed |= !report.Passed;
         }
 
-        if (!report.Passed)
+        Console.WriteLine($"[{(caseFailed ? "FAIL" : "PASS")}] {goldenCase.Id} ({responses.Length} fixture(s))");
+
+        if (caseFailed)
         {
             failures++;
         }
@@ -409,6 +420,10 @@ static async Task<int> ReplayIncidentAsync(CommandLine cli)
 // Checks the judge against human labels. Without this, thresholds are taste, not measurement.
 static async Task<int> CalibrateAsync(CommandLine cli)
 {
+    if (cli.HasFlag("--semantic"))
+    {
+        return await CalibrateSemanticAsync();
+    }
         IReadOnlyList<CalibrationCase> cases = CalibrationSet.Load(RepoPaths.Calibration);
     EvalConfig config = LoadConfig();
 
@@ -478,6 +493,58 @@ static async Task<int> CalibrateAsync(CommandLine cli)
     return 0;
 }
 
+// Chooses semantic thresholds from the labelled fixtures rather than by inspection.
+static async Task<int> CalibrateSemanticAsync()
+{
+    IReadOnlyList<GoldenCase> cases = GoldenSet.Load(RepoPaths.GoldenSet);
+    PositiveFixtureSet positives = PositiveFixtureSet.Load(RepoPaths.PositiveFixtures);
+    NegativeFixtureSet negatives = NegativeFixtureSet.Load(RepoPaths.NegativeFixtures);
+
+    (IEmbeddingGenerator<string, Embedding<float>> embedder, string model) = ModelFactory.CreateEmbedder();
+    Console.WriteLine($"Measuring semantic expectations with {model}\n");
+
+    IReadOnlyList<SemanticSeparation> results = await SemanticCalibration.MeasureAsync(
+        cases, positives, negatives, new SemanticRuleEvaluator(embedder));
+
+    if (results.Count == 0)
+    {
+        Console.WriteLine("No case declares a semantic expectation.");
+        return 0;
+    }
+
+    Console.WriteLine("| Case | Expectation | Must pass | Must fail | Margin | Now | Suggested |");
+    Console.WriteLine("| --- | --- | --- | --- | --- | --- | --- |");
+
+    foreach (SemanticSeparation result in results)
+    {
+        string suggested = result.SuggestedThreshold is double value
+            ? value.ToString("F2")
+            : "none, references overlap";
+
+        Console.WriteLine(
+            $"| {result.CaseId} | {result.Expectation} | {result.MinAccepted:F2} ({result.Accepted}) " +
+            $"| {result.MaxRejected:F2} ({result.Rejected}) | {result.Margin:+0.00;-0.00} " +
+            $"| {result.CurrentThreshold:F2} | {suggested} |");
+    }
+
+    SemanticSeparation[] broken = results.Where(result => !result.CurrentThresholdWorks).ToArray();
+
+    if (broken.Length > 0)
+    {
+        Console.WriteLine();
+
+        foreach (SemanticSeparation result in broken)
+        {
+            Console.WriteLine(result.Separable
+                ? $"  {result.CaseId}: the current threshold {result.CurrentThreshold:F2} is wrong. Use {result.SuggestedThreshold:F2}."
+                : $"  {result.CaseId}: no threshold separates the examples. Improve the reference statements.");
+        }
+    }
+
+    // A measurement, not a gate.
+    return 0;
+}
+
 static (AIAgent Agent, IRunTelemetrySource Telemetry, string Model, UsageTracker Usage) BuildAgent(int repetitions = 1)
 {
     // Repeated runs must bypass the cache, or every repetition replays one stored answer and the
@@ -527,6 +594,8 @@ static int Help()
 
     return 0;
 }
+
+
 
 
 

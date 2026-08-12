@@ -23,6 +23,31 @@ public sealed record RetrievalTrace(
 {
     public static RetrievalTrace Empty(string query) => new(query, []);
 
+    /// <summary>
+    /// Combines the retrievals from every turn of a conversation.
+    /// </summary>
+    /// <remarks>
+    /// A conversation searches the knowledge base once per turn. Keeping only the last search would
+    /// make a retrieval expectation meaningless, because the document that answered the customer may
+    /// have been found two turns earlier. Duplicate chunks keep their best score.
+    /// </remarks>
+    public static RetrievalTrace Merge(IReadOnlyList<RetrievalTrace> traces)
+    {
+        if (traces.Count == 1)
+        {
+            return traces[0];
+        }
+
+        RetrievedChunk[] chunks = traces
+            .SelectMany(trace => trace.Chunks)
+            .GroupBy(chunk => chunk.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(chunk => chunk.Score).First())
+            .OrderByDescending(chunk => chunk.Score)
+            .ToArray();
+
+        return new RetrievalTrace(traces.Count == 0 ? string.Empty : traces[^1].Query, chunks);
+    }
+
     /// <summary>Chunk texts, for <c>RetrievalEvaluatorContext</c>.</summary>
     [JsonIgnore]
     public IReadOnlyList<string> ChunkTexts => Chunks.Select(chunk => chunk.Text).ToArray();
@@ -31,3 +56,4 @@ public sealed record RetrievalTrace(
     [JsonIgnore]
     public string Combined => string.Join("\n\n", Chunks.Select(chunk => $"{chunk.Title}\n{chunk.Text}"));
 }
+

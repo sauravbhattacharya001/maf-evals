@@ -10,7 +10,7 @@ public sealed class CommandLine(string[] args)
         ["tier2"] = ["--no-triad"],
         ["tier3"] = ["--run"],
         ["safety"] = [],
-        ["calibrate"] = ["--repeat", "--case"],
+        ["calibrate"] = ["--repeat", "--case", "--semantic"],
         ["incident"] = ["--trace", "--judge"],
         ["retrieve"] = ["--query", "--top"],
         ["report"] = ["--run"],
@@ -79,6 +79,8 @@ public static class RepoPaths
 
     public static string PositiveFixtures => Path.Combine(Root, "datasets", "positive-fixtures.json");
 
+    public static string NegativeFixtures => Path.Combine(Root, "datasets", "negative-fixtures.json");
+
     public static string Config => Path.Combine(Root, "config", "eval-config.json");
 
     public static string Corpus => Path.Combine(Root, "corpus");
@@ -122,6 +124,8 @@ public static class RepoPaths
         return Directory.GetCurrentDirectory();
     }
 }
+
+
 
 
 

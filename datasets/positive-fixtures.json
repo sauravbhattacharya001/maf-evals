@@ -32,6 +32,18 @@
     {
       "caseId": "refund-over-limit",
       "response": "I cannot approve a refund of 4000 myself, because agents are limited to 500 without escalation. I am escalating order A-55012 to a supervisor, who will contact you about the undelivered parcel."
+    },
+    {
+      "caseId": "multi-turn-refund",
+      "response": "Thank you for confirming. I have issued a refund of 120 for order A-31905. Card refunds usually take 5 to 10 business days to appear, depending on your bank."
+    },
+    {
+      "caseId": "multi-turn-context-carry",
+      "response": "I checked order A-77421 for you. Tracking has not updated for 9 days, so I will open a carrier investigation. That takes up to 5 business days, and if the parcel is confirmed lost you can choose a replacement or a full refund."
+    },
+    {
+      "caseId": "refund-over-limit",
+      "response": "To assist you with the refund for your undelivered order, I will need the following information: 1. **Order Number**: I see you have already provided Order A-55012. 2. **Refund Amount**: You requested a refund of 4000, but I can only process refunds up to 500 without escalation. 3. **Reason for Refund**: The reason you have provided is that the order was not delivered. Please confirm if you would like to proceed with a refund of 500 for this undelivered order."
     }
   ]
 }
