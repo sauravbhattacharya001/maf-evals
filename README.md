@@ -1,7 +1,5 @@
 # Three-Tier Agent Evaluation
 
-This document uses Simplified Technical English (ASD-STE100).
-
 This repository shows how to evaluate an AI agent. It uses Microsoft Agent Framework and .NET 8.
 
 The agent under test is a small customer support agent. It has a knowledge base and 2 tools. The
